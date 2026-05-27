@@ -1,0 +1,29 @@
+// 以下采用陈元哲同学的方法
+{
+    "version": "0.2.0",
+    "configurations": [
+        
+        {
+            "name": "Debug",
+            "type": "cppdbg",
+            "request": "launch",
+            "miDebuggerServerAddress": "localhost:1234",
+            "program": "D:/UNIX V6++test/oos/targets/objs/kernel.exe",
+            "miDebuggerPath": "gdb",
+            "setupCommands": [ 
+            { 
+                "text": "set substitute-path 'D:/UNIX V6++test' C:/Users/Public/Unix_v6pp",
+                //注意第二个参数替换为你的unix v6++文件夹绝对路径 
+                "ignoreFailures": false 
+            } 
+        ],//gdb启动命令，进行gdb路径替换，使gdb能够找到文件
+            "args": [],
+            "stopAtEntry": true,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "preLaunchTask": "OOS run", // 前置任务：启动Bochs
+        }
+    ]
+} 
