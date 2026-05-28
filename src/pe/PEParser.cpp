@@ -5,6 +5,8 @@
 #include "User.h"
 #include "Kernel.h"
 #include "Machine.h"
+#include "Video.h"
+#include "Assembly.h"
 
 PEParser::PEParser()
 {
@@ -27,11 +29,10 @@ unsigned int PEParser::Relocate(Inode* p_inode, int sharedText)
 	unsigned int i0 = 0;
 
 	/* 如果可以和其它进程共享正文段，无需文件中读入正文段 */
-	PageTable* pUserPageTable = Machine::Instance().GetUserPageTableArray();
+	PageTable* pUserPageTable =u.u_MemoryDescriptor.GetUserPageTableArray();
 	unsigned long pageDirectory=(unsigned long)&Machine::Instance().GetPageDirectory();
-	unsigned int textBegin = this->TextAddress >> 12 , textLength = this->TextSize >> 12;
+	unsigned int textBegin = this->TextAddress >> 12 , textLength = (this->TextSize+PageManager::PAGE_SIZE-1) >> 12;
 	PageTableEntry* pointer = (PageTableEntry *)pUserPageTable;
-
 	/*如果与其它进程共享正文段，共享正文段切不可清0*/
 	if(sharedText == 1)
 		i = 1;      // i是段头索引
@@ -41,10 +42,8 @@ unsigned int PEParser::Relocate(Inode* p_inode, int sharedText)
 		// 修改正文段的读写标志，为内核写代码段做准备
 		for (i0 = textBegin; i0 < textBegin + textLength; i0++)
 			pointer[i0].m_ReadWriter = 1;
-
 		FlushPageDirectory(pageDirectory-Machine::KERNEL_SPACE_START_ADDRESS);
 	}
-
     /* 对所有页面执行清0操作，这样bss变量的初值就是0 */
 	for (; i <= this->BSS_SECTION_IDX; i++ )
 	{
@@ -59,7 +58,6 @@ unsigned int PEParser::Relocate(Inode* p_inode, int sharedText)
 			*b = 0;
 		}
 	}
-
 	/* 读正文段（optional）；读文件，得全局变量的初值  */
  	if(sharedText == 1)
 		i = 1;      // i是段头索引
@@ -82,7 +80,6 @@ unsigned int PEParser::Relocate(Inode* p_inode, int sharedText)
 
 		cnt += sectionHeader->Misc.VirtualSize;
 	}
-
 	if(sharedText == 0)
 	{   //将正文段页面改回只读
 		for (i0 = textBegin; i0 < textBegin + textLength; i0++)
@@ -90,7 +87,6 @@ unsigned int PEParser::Relocate(Inode* p_inode, int sharedText)
 
 		FlushPageDirectory(pageDirectory-Machine::KERNEL_SPACE_START_ADDRESS);
 	}
-
 	KernelPageManager& kpm = Kernel::Instance().GetKernelPageManager();
 	kpm.FreeMemory((unsigned long)this->sectionHeaders - 0xC0000000 );
 //	kpm.FreeMemory(section_size * ntHeader.FileHeader.NumberOfSections, (unsigned long)this->sectionHeaders - 0xC0000000 );

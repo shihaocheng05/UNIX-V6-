@@ -238,7 +238,6 @@ extern "C" void next()
 //		FlushPageDirectory();
 
 		CRT::ClearScreen();
-
 		/* 1#进程回用户态，执行exec("shell.exe")系统调用*/
 		MoveToUserStack();
 		__asm__ __volatile__ ("call *%%eax" :: "a"((unsigned long)ExecShell - 0xC0000000));   //要访问用户栈，所以一定要有映射！

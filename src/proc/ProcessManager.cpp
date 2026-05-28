@@ -202,21 +202,18 @@ int ProcessManager::Swtch()
 
 	/* 挑选最适合上台的进程 */
 	Process* selected = Select();
-	//Diagnose::Write("Process id = %d Selected!\n", selected->p_pid);
-
 	/* 恢复被保存进程的现场 */
 	X86Assembly::CLI();
 	SwtchUStruct(selected);
-
 	RetU();
+	X86Assembly::STI();
+	//上面的是原子操作，因此我选择在开中断后再修改其他关键信息
+	User& newu = Kernel::Instance().GetUser();
+	selected=newu.u_procp;
+	Machine::Instance().m_PageDirectory=selected->p_pgTable;
 	PageTable* loadedUserPageTable = (PageTable*)((Machine::Instance().GetPageDirectory().m_Entrys[1].m_PageTableBaseAddress << 12)
 		+ Machine::KERNEL_SPACE_START_ADDRESS);
 	Machine::Instance().m_UserPageTable=loadedUserPageTable;
-	X86Assembly::STI();
-
-	User& newu = Kernel::Instance().GetUser();
-	
-//	newu.u_MemoryDescriptor.MapToPageTable();
 	
 	/*
 	 * If the new process paused because it was
@@ -249,7 +246,6 @@ void ProcessManager::Sched()
 	KernelPageManager&kernelPageManager=Kernel::Instance().GetKernelPageManager();
 	int seconds;
 	unsigned int size;
-
 	/* 
 	 * 选择在交换区驻留时间最长，处于就绪状态的进程换入
 	 */
