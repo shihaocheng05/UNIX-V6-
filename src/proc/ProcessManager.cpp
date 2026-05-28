@@ -118,7 +118,7 @@ int ProcessManager::NewProc()
 		}
 		else {
 			KernelPageManager&kernelPageManager=Kernel::Instance().GetKernelPageManager();
-			PageDirectory* pPageDirectory = &Machine::Instance().GetPageDirectory();
+			PageDirectory* pPageDirectory = u.u_procp->p_pgTable;
 			PageTable* pUserPageTable = (PageTable*)(kernelPageManager.AllocMemory(kernelPageManager.KERNEL_PAGE_POOL_START_ADDR,kernelPageManager.KERNEL_PAGE_POOL_END_ADDR)+Machine::KERNEL_SPACE_START_ADDRESS);
 			unsigned int idx = ((unsigned long)pUserPageTable-Machine::KERNEL_SPACE_START_ADDRESS) >> 12;
 
@@ -139,10 +139,6 @@ int ProcessManager::NewProc()
 				pUserPageTable->m_Entrys[i].m_ReadWriter = 1;
 				pUserPageTable->m_Entrys[i].m_PageBaseAddress = 0x00000 + i + 1024;
 			}
-		
-			Utility::MemCopy((unsigned long)pUserPageTable,
-				(unsigned long)Machine::Instance().GetUserPageTableArray(),
-				sizeof(PageTable));
 		}
 
 		/**  这个版本容易懂
@@ -215,9 +211,7 @@ int ProcessManager::Swtch()
 	RetU();
 	PageTable* loadedUserPageTable = (PageTable*)((Machine::Instance().GetPageDirectory().m_Entrys[1].m_PageTableBaseAddress << 12)
 		+ Machine::KERNEL_SPACE_START_ADDRESS);
-	Utility::MemCopy((unsigned long)loadedUserPageTable,
-		(unsigned long)Machine::Instance().GetUserPageTableArray(),
-		sizeof(PageTable));
+	Machine::Instance().m_UserPageTable=loadedUserPageTable;
 	X86Assembly::STI();
 
 	User& newu = Kernel::Instance().GetUser();

@@ -236,8 +236,6 @@ extern "C" void next()
 	{
 //		Machine::Instance().InitUserPageTable();      //这是直接写0x202,0x203页表，没相对虚实地址映射表一样okay！
 //		FlushPageDirectory();
-		Process*procOne=&Kernel::Instance().GetProcessManager().process[1];
-		SwtchUStruct(procOne);
 
 		CRT::ClearScreen();
 

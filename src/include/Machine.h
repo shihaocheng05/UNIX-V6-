@@ -57,15 +57,15 @@ public:
 	PageTable* GetUserPageTableArray();	/* 获取用户进程页表，共两张，被映射在0x202000和0x203000上，
 										    映射0x00000000 - 0x00800000用户态地址空间 */
 	TaskStateSegment& GetTaskStateSegment();
-	
+	PageDirectory* m_PageDirectory;		//下面皆为线性地址
+	PageTable*	m_UserPageTable;
+
 private:
 	static Machine instance;	/* Machine单体类实例 */
 	
 	IDT* m_IDT;
 	GDT* m_GDT;
-	PageDirectory* m_PageDirectory;		//下面皆为线性地址
 	PageTable*	m_KernelPageTable;
-	PageTable*	m_UserPageTable;
 	TaskStateSegment* m_TaskStateSegment;
 };
 

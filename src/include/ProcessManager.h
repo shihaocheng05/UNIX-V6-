@@ -34,10 +34,7 @@
 	Machine::Instance().GetKernelPageTable().m_Entrys[Kernel::USER_PAGE_INDEX].m_PageBaseAddress \
 		= (p)->p_addr / PageManager::PAGE_SIZE; \
 	FlushPageDirectory((unsigned long)((p)->p_pgTable) - Machine::KERNEL_SPACE_START_ADDRESS);\
-	Utility::MemCopy((unsigned long)(p)->p_pgTable, \
-		(unsigned long)&Machine::Instance().GetPageDirectory(), \
-		sizeof(PageDirectory));
-
+	Machine::Instance().m_PageDirectory=(p)->p_pgTable;
 /* 
  * 恢复esp与ebp到u结构的宏，使用宏的理由同SaveU()
  */
