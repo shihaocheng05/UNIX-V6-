@@ -119,19 +119,12 @@ int ProcessManager::NewProc()
 		else {
 			KernelPageManager&kernelPageManager=Kernel::Instance().GetKernelPageManager();
 			PageDirectory* pPageDirectory = u.u_procp->p_pgTable;
-			PageTable* pUserPageTable = (PageTable*)(kernelPageManager.AllocMemory(kernelPageManager.KERNEL_PAGE_POOL_START_ADDR,kernelPageManager.KERNEL_PAGE_POOL_END_ADDR)+Machine::KERNEL_SPACE_START_ADDRESS);
-			unsigned int idx = ((unsigned long)pUserPageTable-Machine::KERNEL_SPACE_START_ADDRESS) >> 12;
+			if((unsigned long)pPageDirectory->m_Entrys[1].m_PageTableBaseAddress<<12!=((unsigned long)u.u_MemoryDescriptor.m_UserPageTableArray-Machine::KERNEL_SPACE_START_ADDRESS))
+			{
+				Diagnose::Write("pPageDirectory's UserPageTable!=MemoryDescriptor's UserPageTable\n");
+			}
 
-			pPageDirectory->m_Entrys[1].m_UserSupervisor = 1;
-			pPageDirectory->m_Entrys[1].m_Present = 1;
-			pPageDirectory->m_Entrys[1].m_ReadWriter = 1;
-			/* 
-			 * 页目录项BaseAddress字段中记录页表的物理起始地址，而非线性地址。
-			 * 也就是说，分页机制中经由页目录项BaseAddress字段找下一级页表是
-			 * 根据页表的物理地址找到它。分页机制的运作不依赖分页机制的本身--对线性地址的解析。
-			 */
-			pPageDirectory->m_Entrys[1].m_PageTableBaseAddress = idx;
-
+			PageTable*pUserPageTable=u.u_MemoryDescriptor.m_UserPageTableArray;
 			for ( unsigned int i = 0; i < PageTable::ENTRY_CNT_PER_PAGETABLE; i++ )
 			{
 				pUserPageTable->m_Entrys[i].m_UserSupervisor = 1;
@@ -821,7 +814,16 @@ void ProcessManager::Exec()
 	if(sharedText == 0)
 	{
 		u.u_procp->p_flag |= Process::SLOCK;
-		bufMgr.Swap(pText->x_daddr, pText->x_caddr, pText->x_size, Buf::B_WRITE);
+		pText->x_size=(pText->x_size+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE*PageManager::PAGE_SIZE;
+		int textPageNum=pText->x_size/PageManager::PAGE_SIZE;
+		int blkno=pText->x_daddr;
+		PageTable*userPageTableArray=u.u_MemoryDescriptor.m_UserPageTableArray;
+		unsigned int textStartIdx=u.u_MemoryDescriptor.m_TextStartAddress/PageManager::PAGE_SIZE;
+		for(int i=0;i<textPageNum;i++,blkno+=8)
+		{
+			unsigned long phyAddr=userPageTableArray->m_Entrys[textStartIdx+i].m_PageBaseAddress<<12;
+			bufMgr.Swap(blkno, phyAddr, PageManager::PAGE_SIZE, Buf::B_WRITE);
+		}
 		u.u_procp->p_flag &= ~Process::SLOCK;
 	}
 

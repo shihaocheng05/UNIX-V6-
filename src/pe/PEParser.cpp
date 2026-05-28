@@ -48,6 +48,7 @@ unsigned int PEParser::Relocate(Inode* p_inode, int sharedText)
 	for (; i <= this->BSS_SECTION_IDX; i++ )
 	{
 		ImageSectionHeader* sectionHeader = &(this->sectionHeaders[i]);
+
 		int beginVM = sectionHeader->VirtualAddress + ntHeader.OptionalHeader.ImageBase;
 		int size = ((sectionHeader->Misc.VirtualSize + PageManager::PAGE_SIZE - 1)>>12)<<12;
 		int j;
