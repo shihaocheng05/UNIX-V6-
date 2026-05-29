@@ -254,6 +254,7 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 	User& u = Kernel::Instance().GetUser();
 	Process* current = u.u_procp;
 	MemoryDescriptor& md = u.u_MemoryDescriptor;
+	Diagnose::Write("enter PageFault!\n");
 
 	unsigned int cr2;
 	__asm__ __volatile__(" mov %%cr2, %0":"=r"(cr2) );
@@ -263,6 +264,7 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 	if( (context->xcs & USER_MODE) == USER_MODE)
 	{
 		//判断是否是写操作引发异常及目标段是否可写
+		Diagnose::Write("enter Swtch 1!\n");
 		unsigned int error_code=context->error_code;
 		bool isRW=error_code&(1UL<<1);
 		isRW=isRW&&(cr2>=md.m_DataStartAddress&&cr2<=md.m_DataStartAddress+md.m_DataSize||cr2>=MemoryDescriptor::USER_SPACE_SIZE-md.m_StackSize&&cr2<=MemoryDescriptor::USER_SPACE_SIZE);
@@ -289,7 +291,9 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 				}
 				userPageManager.FreeMemory(base<<12);
 			}
+			Diagnose::Write("enter isRW!\n");
 			pUserPageTable->m_Entrys[pageIdx].m_ReadWriter=1;
+			FlushPageDirectory((unsigned long)&Machine::Instance().GetPageDirectory()-Machine::KERNEL_SPACE_START_ADDRESS);
 			return;
 		}
 		Diagnose::Write("Page Fault in user Mode,CR2=%x",cr2);

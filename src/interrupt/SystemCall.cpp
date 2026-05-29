@@ -5,6 +5,7 @@
 #include "TimeInterrupt.h"
 #include "CRT.h"
 #include "Video.h"
+#include "Machine.h"
 
 /* 系统调用入口表的定义
  * 参照UNIX V6中sysent.c中对系统调用入口表sysent的定义 @line 2910 

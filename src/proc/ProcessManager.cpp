@@ -121,7 +121,7 @@ int ProcessManager::NewProc()
 			PageDirectory* pPageDirectory = u.u_procp->p_pgTable;
 			if((unsigned long)pPageDirectory->m_Entrys[1].m_PageTableBaseAddress<<12!=((unsigned long)u.u_MemoryDescriptor.m_UserPageTableArray-Machine::KERNEL_SPACE_START_ADDRESS))
 			{
-				Diagnose::Write("pPageDirectory's UserPageTable!=MemoryDescriptor's UserPageTable\n");
+				Diagnose::Write("pPageDirectory's UserPageTable!=MemoryDescriptor's UserPageTable!\n");
 			}
 
 			PageTable*pUserPageTable=u.u_MemoryDescriptor.m_UserPageTableArray;
@@ -818,7 +818,7 @@ void ProcessManager::Exec()
 		int textPageNum=pText->x_size/PageManager::PAGE_SIZE;
 		int blkno=pText->x_daddr;
 		PageTable*userPageTableArray=u.u_MemoryDescriptor.m_UserPageTableArray;
-		unsigned int textStartIdx=u.u_MemoryDescriptor.m_TextStartAddress/PageManager::PAGE_SIZE;
+		unsigned int textStartIdx=(u.u_MemoryDescriptor.m_TextStartAddress%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
 		for(int i=0;i<textPageNum;i++,blkno+=8)
 		{
 			unsigned long phyAddr=userPageTableArray->m_Entrys[textStartIdx+i].m_PageBaseAddress<<12;
@@ -826,7 +826,6 @@ void ProcessManager::Exec()
 		}
 		u.u_procp->p_flag &= ~Process::SLOCK;
 	}
-
 	/* 将fakeStack中备份的用户栈参数复制到新进程图像的用户栈中 */
 	//Utility::MemCopy(fakeStack | 0xC0000000, MemoryDescriptor::USER_SPACE_SIZE - parser.StackSize, parser.StackSize);
 	/* 释放用于读入exe文件和备份用户栈参数的内存：mapAddress和fakeStack */
@@ -867,7 +866,6 @@ void ProcessManager::Exec()
 
 	/* 将exe程序的入口地址放入核心栈现场保护区中的EAX作为系统调用返回值，这个是runtime要用  */
 	u.u_ar0[User::EAX] = parser.EntryPointAddress;
-	
 	/* 构造出Exec()系统调用的退出环境，使之退出到ring3时，开始执行user code */
 	struct pt_context* pContext = (struct pt_context *)u.u_arg[4];
 	pContext->eip = 0x00000000;	/* 退出到ring3特权级下从线性地址0x00000000处runtime()开始执行 */
@@ -876,6 +874,7 @@ void ProcessManager::Exec()
 	pContext->eflags = 0x200;	/* 此项是否篡改无关紧要 */
 	pContext->esp = esp;
 	pContext->xss = Machine::USER_DATA_SEGMENT_SELECTOR;
+	Diagnose::Write("Exec exit!\n");
 }
 
 Process* ProcessManager::Select ()
@@ -970,7 +969,7 @@ void ProcessManager::WakeUpAll(unsigned long chan)
 	{
 		if( this->process[i].IsSleepOn(chan) )
 		{
-			Diagnose::Write("WakeUpAll: pid=%d chan=%x\n", this->process[i].p_pid, chan);
+//			Diagnose::Write("WakeUpAll: pid=%d chan=%x\n", this->process[i].p_pid, chan);
 			this->process[i].SetRun();
 		}
 	}

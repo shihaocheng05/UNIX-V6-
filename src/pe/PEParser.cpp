@@ -7,6 +7,7 @@
 #include "Machine.h"
 #include "Video.h"
 #include "Assembly.h"
+#include "PageTable.h"
 
 PEParser::PEParser()
 {
@@ -31,7 +32,7 @@ unsigned int PEParser::Relocate(Inode* p_inode, int sharedText)
 	/* 如果可以和其它进程共享正文段，无需文件中读入正文段 */
 	PageTable* pUserPageTable =u.u_MemoryDescriptor.GetUserPageTableArray();
 	unsigned long pageDirectory=(unsigned long)&Machine::Instance().GetPageDirectory();
-	unsigned int textBegin = this->TextAddress >> 12 , textLength = (this->TextSize+PageManager::PAGE_SIZE-1) >> 12;
+	unsigned int textBegin = (this->TextAddress%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE , textLength = (this->TextSize+PageManager::PAGE_SIZE-1) >> 12;
 	PageTableEntry* pointer = (PageTableEntry *)pUserPageTable;
 	/*如果与其它进程共享正文段，共享正文段切不可清0*/
 	if(sharedText == 1)

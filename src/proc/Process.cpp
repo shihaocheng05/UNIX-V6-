@@ -94,7 +94,7 @@ void Process::Sleep(unsigned long chan, int pri)
 		this->p_stat = Process::SWAIT;
 		this->p_pri = pri;
 		X86Assembly::STI();
-		Diagnose::Write("Sleep: pid=%d chan=%x pri=%d\n", this->p_pid, chan, pri);
+//		Diagnose::Write("Sleep: pid=%d chan=%x pri=%d\n", this->p_pid, chan, pri);
 
 		if ( procMgr.RunIn != 0 )
 		{
@@ -121,7 +121,7 @@ void Process::Sleep(unsigned long chan, int pri)
 		this->p_stat = Process::SSLEEP;
 		this->p_pri = pri;
 		X86Assembly::STI();
-		Diagnose::Write("Sleep: pid=%d chan=%x pri=%d\n", this->p_pid, chan, pri);
+//		Diagnose::Write("Sleep: pid=%d chan=%x pri=%d\n", this->p_pid, chan, pri);
 
 		/* 当前进程放弃CPU，切换其它进程上台 */
 		//Diagnose::Write("Process %d Start Sleep!\n", this->p_pid);

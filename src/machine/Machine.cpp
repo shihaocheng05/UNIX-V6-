@@ -241,7 +241,7 @@ void Machine::InitUserPageTable()
 {
 	PageDirectory* pPageDirectory = this->m_PageDirectory;
 	PageTable* pUserPageTable =
-		(PageTable*)(USER_ZERO_PAGE_TABLE_BASE_ADDRESS + KERNEL_SPACE_START_ADDRESS);	//0#用户页表
+		(PageTable*)(USER_ZERO_PAGE_TABLE_BASE_ADDRESS + KERNEL_SPACE_START_ADDRESS);	//0#用户页表,线性地址0-4M映射到物理地址0-4M
 	for ( unsigned int i = 0; i < PageTable::ENTRY_CNT_PER_PAGETABLE; i++ )
 	{
 		pUserPageTable[0].m_Entrys[i].m_UserSupervisor = 1;
@@ -249,7 +249,7 @@ void Machine::InitUserPageTable()
 		pUserPageTable[0].m_Entrys[i].m_ReadWriter = 1;
 		pUserPageTable[0].m_Entrys[i].m_PageBaseAddress = i ;
 	}
-	this->m_UserPageTable = pUserPageTable;	
+	this->m_UserPageTable = pUserPageTable;		//初始化时，Machine的用户页表存放0#用户页表。在第一次Swtch调度后，开始存放现运行进程的1#用户页表。
 }
 
 void Machine::InitTaskStateSegment()
