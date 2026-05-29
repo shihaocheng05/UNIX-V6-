@@ -254,7 +254,6 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 	User& u = Kernel::Instance().GetUser();
 	Process* current = u.u_procp;
 	MemoryDescriptor& md = u.u_MemoryDescriptor;
-	Diagnose::Write("enter PageFault!\n");
 
 	unsigned int cr2;
 	__asm__ __volatile__(" mov %%cr2, %0":"=r"(cr2) );
@@ -264,14 +263,17 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 	if( (context->xcs & USER_MODE) == USER_MODE)
 	{
 		//判断是否是写操作引发异常及目标段是否可写
-		Diagnose::Write("enter Swtch 1!\n");
 		unsigned int error_code=context->error_code;
+		PageTable*pUserPageTable=md.GetUserPageTableArray();
 		bool isRW=error_code&(1UL<<1);
-		isRW=isRW&&(cr2>=md.m_DataStartAddress&&cr2<=md.m_DataStartAddress+md.m_DataSize||cr2>=MemoryDescriptor::USER_SPACE_SIZE-md.m_StackSize&&cr2<=MemoryDescriptor::USER_SPACE_SIZE);
+		isRW=isRW&&(cr2>=md.m_DataStartAddress&&cr2<=(md.m_DataStartAddress+md.m_DataSize)||cr2>=(MemoryDescriptor::USER_SPACE_SIZE-md.m_StackSize)&&cr2<=MemoryDescriptor::USER_SPACE_SIZE);
+		if(isRW)
+		{
+			isRW=isRW&&(pUserPageTable->m_Entrys[(cr2&(0x3FF<<12))>>12].m_Present==1);
+		}
 		if(isRW)
 		{
 			//COW
-			PageTable*pUserPageTable=md.GetUserPageTableArray();
 			unsigned int pageIdx=(cr2&(0x3FF<<12))>>12;
 			unsigned int base=pUserPageTable->m_Entrys[pageIdx].m_PageBaseAddress;
 			UserPageManager&userPageManager=Kernel::Instance().GetUserPageManager();
@@ -291,12 +293,11 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 				}
 				userPageManager.FreeMemory(base<<12);
 			}
-			Diagnose::Write("enter isRW!\n");
 			pUserPageTable->m_Entrys[pageIdx].m_ReadWriter=1;
 			FlushPageDirectory((unsigned long)&Machine::Instance().GetPageDirectory()-Machine::KERNEL_SPACE_START_ADDRESS);
 			return;
 		}
-		Diagnose::Write("Page Fault in user Mode,CR2=%x",cr2);
+		Diagnose::Write("Page Fault in user Mode,CR2=%x\n",cr2);
 		if( cr2 < MemoryDescriptor::USER_SPACE_SIZE - md.m_StackSize && cr2 >= context->esp - 8
 				&& md.m_DataSize + md.m_StackSize + PageManager::PAGE_SIZE < MemoryDescriptor::USER_SPACE_SIZE - md.m_DataStartAddress )
 			current->SStack();

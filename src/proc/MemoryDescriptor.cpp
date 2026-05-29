@@ -194,6 +194,7 @@ void MemoryDescriptor::EstablishUserPageTable( unsigned long textVirtualAddress,
 //改写为通过父进程的1#用户页表m_UserPageTableArray写子进程的1#用户页表
 void MemoryDescriptor::CopyUserPageTable(PageTable* pgTable,unsigned int Page[])
 {
+	ClearUserPageTable();
 	User& u=Kernel::Instance().GetUser();
 	PageTableEntry*entry=pgTable->m_Entrys;
 	PageTableEntry*new_entry=(PageTableEntry*)this->m_UserPageTableArray;
@@ -242,18 +243,14 @@ void MemoryDescriptor::ClearUserPageTable()
 	User& u = Kernel::Instance().GetUser();
 	PageTable* pUserPageTable = u.u_MemoryDescriptor.m_UserPageTableArray;
 
-	unsigned int i ;
 	unsigned int j ;
 
-	for (i = 0; i < Machine::USER_PAGE_TABLE_CNT; i++)
+	for (j = 0; j < PageTable::ENTRY_CNT_PER_PAGETABLE; j++ )
 	{
-		for (j = 0; j < PageTable::ENTRY_CNT_PER_PAGETABLE; j++ )
-		{
-			pUserPageTable[i].m_Entrys[j].m_Present = 0;
-			pUserPageTable[i].m_Entrys[j].m_ReadWriter = 0;
-			pUserPageTable[i].m_Entrys[j].m_UserSupervisor = 1;
-			pUserPageTable[i].m_Entrys[j].m_PageBaseAddress = 0;
-		}
+		pUserPageTable->m_Entrys[j].m_Present = 0;
+		pUserPageTable->m_Entrys[j].m_ReadWriter = 0;
+		pUserPageTable->m_Entrys[j].m_UserSupervisor = 1;
+		pUserPageTable->m_Entrys[j].m_PageBaseAddress = 0;
 	}
 
 }

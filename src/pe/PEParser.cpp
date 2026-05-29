@@ -90,7 +90,7 @@ unsigned int PEParser::Relocate(Inode* p_inode, int sharedText)
 		FlushPageDirectory(pageDirectory-Machine::KERNEL_SPACE_START_ADDRESS);
 	}
 	KernelPageManager& kpm = Kernel::Instance().GetKernelPageManager();
-	kpm.FreeMemory((unsigned long)this->sectionHeaders - 0xC0000000 );
+	kpm.FreeMemory((unsigned long)this->sectionHeaders - 0xC0000000);
 //	kpm.FreeMemory(section_size * ntHeader.FileHeader.NumberOfSections, (unsigned long)this->sectionHeaders - 0xC0000000 );
 //	delete this->sectionHeaders;
 	return 	cnt;

@@ -34,6 +34,7 @@ public:
 
 	//重写为传入分配区域（用户区或者核心区）的始末物理地址，每次分配一页
 	unsigned long AllocMemory(unsigned long startAddr,unsigned long endAddr);
+	unsigned long AllocContinueMemory(unsigned long startAddr,unsigned long endAddr,unsigned long size);
 	/* 
 	 * 物理内存释放
 	 * 
@@ -45,7 +46,7 @@ public:
 
 	//重写为每次尝试释放一个物理页框
 	unsigned long FreeMemory(unsigned long pgAddr);
-
+	unsigned long FreeContinueMemory(unsigned long pgAddr,unsigned long size);
 	//判断空间是否充足
 	bool EnoughSpace(unsigned long startAddr,unsigned long endAddr,unsigned long size);
 

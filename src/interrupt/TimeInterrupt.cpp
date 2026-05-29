@@ -123,12 +123,9 @@ void Time::Clock( struct pt_regs* regs, struct pt_context* context )
 				if ( pProcess->p_pri > ProcessManager::PUSER )
 				{
 					pProcess->SetPri();
-					//Diagnose::Write("PID = %d, p_cpu = %d, p_pri = %d\n", pProcess->p_pid, pProcess->p_cpu, pProcess->p_pri);
 				}
 			}
 		}
-		//Diagnose::Write("curpri = %d\n", procMgr.CurPri);
-		//Diagnose::Write("System Time: %d\n", Time::time);
 		
 		if ( procMgr.RunIn != 0 )
 		{

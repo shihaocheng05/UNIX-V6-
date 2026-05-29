@@ -123,15 +123,8 @@ int ProcessManager::NewProc()
 			{
 				Diagnose::Write("pPageDirectory's UserPageTable!=MemoryDescriptor's UserPageTable!\n");
 			}
-
 			PageTable*pUserPageTable=u.u_MemoryDescriptor.m_UserPageTableArray;
-			for ( unsigned int i = 0; i < PageTable::ENTRY_CNT_PER_PAGETABLE; i++ )
-			{
-				pUserPageTable->m_Entrys[i].m_UserSupervisor = 1;
-				pUserPageTable->m_Entrys[i].m_Present = 1;
-				pUserPageTable->m_Entrys[i].m_ReadWriter = 1;
-				pUserPageTable->m_Entrys[i].m_PageBaseAddress = 0x00000 + i + 1024;
-			}
+			u.u_MemoryDescriptor.ClearUserPageTable();
 		}
 
 		/**  这个版本容易懂
@@ -642,13 +635,35 @@ void ProcessManager::Exec()
 	 * 分配好新进程图像之后，再将fakeStack中的备份参数拷贝到新进程的用户栈中。
 	 */
 	//unsigned long fakeStack = kernelPgMgr.AllocMemory(parser.StackSize);
-	unsigned long fakeStack = userPgMgr.AllocMemory(userPgMgr.USER_PAGE_POOL_START_ADDR,userPgMgr.USER_END_ADDR);	//直接分配一页用户栈区域
+	//先释放栈区并重建，其他后面再来
 	PageTable*userPageTableArray=u.u_MemoryDescriptor.GetUserPageTableArray();
+	for(unsigned int i=0;i<u.u_MemoryDescriptor.m_StackSize/userPgMgr.PAGE_SIZE;i++)
+	{
+		if(userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_Present==1)
+		{
+			unsigned long phyIdx=(unsigned long)userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_PageBaseAddress<<12;
+			userPgMgr.FreeMemory(phyIdx);
+			userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_Present=0;
+		}
+	}
+
+	unsigned long fakeStack = userPgMgr.AllocMemory(userPgMgr.USER_PAGE_POOL_START_ADDR,userPgMgr.USER_END_ADDR);	//直接分配一页用户栈区域
 	unsigned int stackPhyIdx=fakeStack/userPgMgr.PAGE_SIZE;
 	userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1].m_Present=1;
 	userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1].m_ReadWriter=1;
 	userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1].m_UserSupervisor=1;
 	userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1].m_PageBaseAddress=stackPhyIdx;
+
+	//分配剩余初始栈
+	unsigned int stackPageNum=u.u_MemoryDescriptor.m_StackSize/userPgMgr.PAGE_SIZE;
+	for(unsigned int i=1;i<stackPageNum;i++)
+	{
+		unsigned long phyIdx=userPgMgr.AllocMemory(userPgMgr.USER_PAGE_POOL_START_ADDR,userPgMgr.USER_END_ADDR)/userPgMgr.PAGE_SIZE;
+		userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_Present=1;
+		userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_ReadWriter=1;
+		userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_UserSupervisor=1;
+		userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_PageBaseAddress=phyIdx;
+	}
 
 	int argc = u.u_arg[1];
 	char** argv = (char **)u.u_arg[2];
@@ -722,12 +737,6 @@ void ProcessManager::Exec()
 		unsigned long phyIdx=(unsigned long)userPageTableArray->m_Entrys[dataStartIdx+i].m_PageBaseAddress<<12;
 		userPgMgr.FreeMemory(phyIdx);
 		userPageTableArray->m_Entrys[dataStartIdx+i].m_Present=0;
-	}
-	for(unsigned int i=0;i<u.u_MemoryDescriptor.m_StackSize/userPgMgr.PAGE_SIZE;i++)
-	{
-		unsigned long phyIdx=(unsigned long)userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_PageBaseAddress<<12;
-		userPgMgr.FreeMemory(phyIdx);
-		userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_Present=0;
 	}
 
 	Process::ProcessState p_stat=u.u_procp->p_stat;
@@ -917,7 +926,6 @@ Process* ProcessManager::Select ()
 		/* 如果选出优先级最高的可运行进程 */
 		this->CurPri = priority;
 		lastSelect = best;
-		//Diagnose::Write("Process %d is running!",best);
 		return &process[best];
 
 	}
@@ -969,7 +977,6 @@ void ProcessManager::WakeUpAll(unsigned long chan)
 	{
 		if( this->process[i].IsSleepOn(chan) )
 		{
-//			Diagnose::Write("WakeUpAll: pid=%d chan=%x\n", this->process[i].p_pid, chan);
 			this->process[i].SetRun();
 		}
 	}

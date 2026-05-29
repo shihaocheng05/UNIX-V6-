@@ -167,8 +167,6 @@ void SystemCall::Trap(struct pt_regs* regs, struct pt_context* context)
 
 	SystemCallTableEntry *callp = &m_SystemEntranceTable[regs->eax];
 
-	//Diagnose::Write("eax = %d, callp: count = %d, address = %x\n", regs->eax, callp->count, callp->call);
-
 	/* 根据callp->count将系统调用的传入参数从寄存器放入u.u_arg[5] */
 	unsigned int * syscall_arg = (unsigned int *)&regs->ebx;
 	for( unsigned int i = 0; i < callp->count; i++ )

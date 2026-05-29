@@ -187,8 +187,6 @@ extern "C" void next()
 	Kernel::Instance().GetFileSystem().LoadSuperBlock();
 	Diagnose::Write("Unix V6++ FileSystem Loaded......OK\n");
 
-	Diagnose::Write("test \n");
-
 	/*  初始化rootDirInode和用户当前工作目录，以便NameI()正常工作 */
 	FileManager& fileMgr = Kernel::Instance().GetFileManager();
 
