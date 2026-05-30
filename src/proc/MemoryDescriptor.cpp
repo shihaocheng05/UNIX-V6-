@@ -204,7 +204,7 @@ void MemoryDescriptor::CopyUserPageTable(PageTable* pgTable,unsigned int Page[])
 	{
 		new_entry[i].m_Present=entry[i].m_Present;
 		new_entry[i].m_UserSupervisor=entry[i].m_UserSupervisor;
-		if(entry[i].m_ReadWriter)
+		if(entry[i].m_Present)
 		{
 			Page[entry[i].m_PageBaseAddress]++;
 			entry[i].m_ReadWriter=false;
@@ -220,22 +220,12 @@ void MemoryDescriptor::DisplayPageTable()
 	unsigned int i,j;
 
 	Diagnose::Write("Process PT:");
-	for (i = 0; i < Machine::USER_PAGE_TABLE_CNT; i++)
-		for ( j = 0; j < PageTable::ENTRY_CNT_PER_PAGETABLE; j++)
-			if ( 1 == this->m_UserPageTableArray[i].m_Entrys[j].m_Present )
-				Diagnose::Write("<%d,%x>  ",i*1024+j,this->m_UserPageTableArray[i].m_Entrys[j].m_PageBaseAddress);
+	for ( j = 0; j < PageTable::ENTRY_CNT_PER_PAGETABLE; j++)
+			if ( 1 == this->m_UserPageTableArray->m_Entrys[j].m_Present )
+				Diagnose::Write("<%d,%x>  ",j,this->m_UserPageTableArray->m_Entrys[j].m_PageBaseAddress);
 	Diagnose::Write("\n");
 
 	Diagnose::Write("<PPDA,%x>  ",Machine::Instance().GetKernelPageTable().m_Entrys[1023].m_PageBaseAddress);
-
-	PageTable* pUserPageTable = (PageTable*)((unsigned int)(Machine::Instance().GetPageDirectory().m_Entrys[0].m_PageTableBaseAddress) << 12 | 0xC0000000);
-	Diagnose::Write("User PT: %x", (unsigned int)pUserPageTable);
-
-//	for (i = 0; i < Machine::USER_PAGE_TABLE_CNT; i++)
-		for ( j = 1; j < PageTable::ENTRY_CNT_PER_PAGETABLE; j++)
-			if ( 1 == pUserPageTable[1].m_Entrys[j].m_Present )
-				Diagnose::Write("<%d,%x>  ",1*1024+j,pUserPageTable[1].m_Entrys[j].m_PageBaseAddress);
-	Diagnose::Write("\n");
 }
 
 void MemoryDescriptor::ClearUserPageTable()

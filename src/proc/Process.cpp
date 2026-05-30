@@ -266,7 +266,7 @@ void Process::Exit()
 	u.u_procp->p_stat=p_stat;
 
 	Process* current = u.u_procp;
-//	userPageMgr.FreeMemory(current->p_size, current->p_addr);
+	userPageMgr.FreeMemory(current->p_addr);
 	current->p_addr = blkno;
 	current->p_stat = Process::SZOMB;
 

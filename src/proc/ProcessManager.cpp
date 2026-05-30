@@ -611,17 +611,6 @@ void ProcessManager::Exec()
         return;
     }
 
- 	/* 获取分析PE头结构得到正文段的起始地址、长度 */
-	u.u_MemoryDescriptor.m_TextStartAddress = parser.TextAddress;
-	u.u_MemoryDescriptor.m_TextSize = parser.TextSize;
-
-	/* 数据段的起始地址、长度 */
-	u.u_MemoryDescriptor.m_DataStartAddress = parser.DataAddress;
-	u.u_MemoryDescriptor.m_DataSize = parser.DataSize;
-
-	/* 堆栈段初始化长度 */
-	u.u_MemoryDescriptor.m_StackSize = parser.StackSize;
-	
 	if ( parser.TextSize + parser.DataSize + parser.StackSize  + PageManager::PAGE_SIZE > MemoryDescriptor::USER_SPACE_SIZE - parser.TextAddress)
 	{
 		fileMgr.m_InodeTable->IPut(pInode);
@@ -654,6 +643,8 @@ void ProcessManager::Exec()
 	userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1].m_UserSupervisor=1;
 	userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1].m_PageBaseAddress=stackPhyIdx;
 
+	/* 堆栈段初始化长度 */
+	u.u_MemoryDescriptor.m_StackSize = parser.StackSize;
 	//分配剩余初始栈
 	unsigned int stackPageNum=u.u_MemoryDescriptor.m_StackSize/userPgMgr.PAGE_SIZE;
 	for(unsigned int i=1;i<stackPageNum;i++)
@@ -738,6 +729,14 @@ void ProcessManager::Exec()
 		userPgMgr.FreeMemory(phyIdx);
 		userPageTableArray->m_Entrys[dataStartIdx+i].m_Present=0;
 	}
+
+		/* 获取分析PE头结构得到正文段的起始地址、长度 */
+	u.u_MemoryDescriptor.m_TextStartAddress = parser.TextAddress;
+	u.u_MemoryDescriptor.m_TextSize = parser.TextSize;
+
+	/* 数据段的起始地址、长度 */
+	u.u_MemoryDescriptor.m_DataStartAddress = parser.DataAddress;
+	u.u_MemoryDescriptor.m_DataSize = parser.DataSize;
 
 	Process::ProcessState p_stat=u.u_procp->p_stat;
 	u.u_procp->p_stat=Process::SSTOP;
