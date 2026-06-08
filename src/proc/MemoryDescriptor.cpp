@@ -199,6 +199,12 @@ void MemoryDescriptor::CopyUserPageTable(PageTable* pgTable,unsigned int Page[])
 	PageTableEntry*entry=pgTable->m_Entrys;
 	PageTableEntry*new_entry=(PageTableEntry*)this->m_UserPageTableArray;
 
+	  /* 计算正文段在此页表中的索引范围。                                                                                                                
+      * 正文段由 x_ccount 管理生命周期，不应参与 Page[] COW 引用计数，                                                                                  
+      * 否则每次 Fork 给 Page[text_pfn]++，但只在 Shell 最终 Exit                                                                                       
+      * (x_ccount→0) 时 FreeMemory 一次，Page[] 引用计数净泄露 */                                                                                       
+      unsigned int textStartIdx = (u.u_MemoryDescriptor.m_TextStartAddress % PageTable::SIZE_PER_PAGETABLE_MAP) / PageManager::PAGE_SIZE;                
+      unsigned int textPageNum = (u.u_MemoryDescriptor.m_TextSize + PageManager::PAGE_SIZE - 1) / PageManager::PAGE_SIZE;   
 	
 	for(unsigned i=0;i<PageTable::ENTRY_CNT_PER_PAGETABLE;i++)
 	{
@@ -206,7 +212,12 @@ void MemoryDescriptor::CopyUserPageTable(PageTable* pgTable,unsigned int Page[])
 		new_entry[i].m_UserSupervisor=entry[i].m_UserSupervisor;
 		if(entry[i].m_Present)
 		{
-			Page[entry[i].m_PageBaseAddress]++;
+			/* 正文段页：生命周期由 p_textp->x_ccount 管理，不使用 Page[] COW 计数 */                                                                      
+      		bool isTextPage = (u.u_procp->p_textp != NULL)&& (i >= textStartIdx)&& (i < textStartIdx + textPageNum);                                                                                            
+      		if (!isTextPage)                                                                                                                               
+      		{                                                                                                                                              
+      		  Page[entry[i].m_PageBaseAddress]++;                                                                                                          
+      		}                                                    
 			entry[i].m_ReadWriter=false;
 		}
 		new_entry[i].m_ReadWriter=entry[i].m_ReadWriter;
