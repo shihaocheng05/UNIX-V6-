@@ -1,11 +1,14 @@
 #ifndef USER_H
 #define USER_H
 
+#define VM_AREA_MAX 8
+
 #include "MemoryDescriptor.h"
 #include "Process.h"
 #include "File.h"
 #include "INode.h"
 #include "FileManager.h"
+#include "VMArea.h"
 
 /*
  * @comment 该类与Unixv6中 struct user结构对应，因此只改变
@@ -105,6 +108,10 @@ public:
 	 * u_ssize
 	 */
 	MemoryDescriptor u_MemoryDescriptor;
+
+	/*vm新增结构*/
+	vm_area vm_list[VM_AREA_MAX];
+	int vm_count;
 
 	/* 系统调用相关成员 */
 	unsigned int	*u_ar0;		/* 指向核心栈现场保护区中EAX寄存器

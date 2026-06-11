@@ -2,6 +2,7 @@
 #define ALLOCATOR_H
 
 #include "MapNode.h"
+#include "Page.h"
 
 /* @comment 该类为内存分配算法类，针对使用MapNode
  * 数组标记的情况，可以用在PageManager和SwapDiskManager中

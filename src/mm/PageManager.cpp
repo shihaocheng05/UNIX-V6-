@@ -111,6 +111,17 @@ int KernelPageManager::Initialize()
 UserPageManager::UserPageManager(PageAllocator* pgallocator)
 	:PageManager(pgallocator)
 {
+	unsigned int userSpaceStartIdx=USER_PAGE_POOL_START_ADDR/PAGE_SIZE;
+	pgallocator->Page[userSpaceStartIdx]=0;
+	unsigned int i=1;
+	for(;i<freePageNum;i++)
+	{
+		pgallocator->Page[i+userSpaceStartIdx]=0;
+		freePage[i-1].next=&freePage[i];
+	}
+	freePage[freePageNum-1].next=NULL;
+	freeList.head=&freePage[0];
+	freeList.tail=&freePage[freePageNum-1];
 }
 
 int UserPageManager::Initialize()

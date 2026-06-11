@@ -3,6 +3,7 @@
 
 #include "MapNode.h"
 #include "Allocator.h"
+#include "Page.h"
 
 class PageManager
 {
@@ -85,11 +86,14 @@ class UserPageManager : public PageManager
 {
 public:
 	/* static const member */
-	static const unsigned long USER_PAGE_POOL_START_ADDR = 0x400000;		/* 用户物理内存区域起始地址4MB */
+	static const unsigned long USER_PAGE_POOL_START_ADDR = 0x401000;		/* 用户物理内存区域起始地址4MB，但是0x400是0#进程的PPDA，应保留 */
+	static const unsigned int freePageNum=(0x2000000-0x401000)/PAGE_SIZE;		/*用户区全部可以用于分配的页框数目*/
 	/* static member */
 	static unsigned int USER_PAGE_POOL_SIZE;		/* 用户物理内存区域大小：由内核初始化时进行设置 */
 	static const unsigned long USER_END_ADDR=0x2000000;
-	
+	FreeList freeList;
+	page freePage[freePageNum];		/*全部可以被分配的用户区物理页框*/
+
 public:
 	UserPageManager(PageAllocator* pgallocator);
 	int Initialize();	/* 初始化MapNode map[0]为用户物理页区起始地址、大小 */

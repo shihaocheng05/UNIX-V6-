@@ -3,6 +3,7 @@
 
 #include "MapNode.h"
 #include "Allocator.h"
+#include "Page.h"
 
 class SwapperManager
 {
@@ -11,6 +12,7 @@ public:
 	/* !hard code!设定磁盘从18000#开始的2000个扇区作为交换区 */
 	static unsigned int SWAPPER_ZONE_START_BLOCK;
 	static unsigned int SWAPPER_ZONE_SIZE;
+	static const unsigned int SWAPPER_PAGE_NUM=2000/8;	//8个扇区8*512==4096B，一页
 
 	/* static const member */
 	static const unsigned int SWAPPER_MAP_ARRAY_SIZE = 0x200;
@@ -49,7 +51,8 @@ private:
 	/* Members */
 public:
 	MapNode map[SwapperManager::SWAPPER_MAP_ARRAY_SIZE];
-
+	/*需要维护SwapPage数组*/
+	SwapPage SwapperPage[SWAPPER_PAGE_NUM];
 private:
 	Allocator* m_pAllocator;
 };

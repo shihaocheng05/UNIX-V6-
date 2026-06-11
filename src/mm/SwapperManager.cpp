@@ -6,6 +6,12 @@ unsigned int SwapperManager::SWAPPER_ZONE_SIZE = 2000;
 SwapperManager::SwapperManager(Allocator *pAllocator)
 {
 	this->m_pAllocator = pAllocator;
+	for(unsigned int i=0;i<SWAPPER_PAGE_NUM;i++)
+	{
+		SwapperPage[i].pageNo=0;
+		SwapperPage[i].swapPageNo=i;
+		SwapperPage[i].pte=NULL;
+	}
 }
 
 SwapperManager::SwapperManager()
