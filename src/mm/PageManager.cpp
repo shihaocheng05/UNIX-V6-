@@ -117,11 +117,13 @@ UserPageManager::UserPageManager(PageAllocator* pgallocator)
 	for(;i<freePageNum;i++)
 	{
 		pgallocator->Page[i+userSpaceStartIdx]=0;
-		freePage[i-1].next=&freePage[i];
+		pages[i-1].next=&pages[i];
+		pages[i-1].pageNo=i-1+userSpaceStartIdx;	//一一对应，每个page结构体反向映射到其在pages数组中的索引
 	}
-	freePage[freePageNum-1].next=NULL;
-	freeList.head=&freePage[0];
-	freeList.tail=&freePage[freePageNum-1];
+	pages[freePageNum-1].next=NULL;
+	pages[freePageNum-1].pageNo=userSpaceStartIdx+freePageNum-1;
+	freeList.head=&pages[0];
+	freeList.tail=&pages[freePageNum-1];
 }
 
 int UserPageManager::Initialize()
@@ -135,3 +137,45 @@ int UserPageManager::Initialize()
 	return 0;
 }
 
+unsigned long UserPageManager::AllocMemory()
+{
+	page*freePage=freeList.head;
+	if(freePage!=NULL)
+	{
+		this->m_pAllocator->Page[freePage->pageNo]=1;
+		freeList.head=freePage->next;
+		freePage->next=NULL;
+		return freePage->pageNo<<12;
+	}
+	if(freeList.head==NULL)
+	{
+		freeList.tail=NULL;
+	}
+	return 0;
+}
+
+unsigned long UserPageManager::FreeMemory(unsigned long phyAddr)
+{
+	if(phyAddr>=USER_PAGE_POOL_START_ADDR&&phyAddr<USER_END_ADDR)
+	{
+		unsigned int phyIdx=phyAddr>>12;
+		if(this->m_pAllocator->Page[phyIdx]<=0) return 0;
+		if(--this->m_pAllocator->Page[phyIdx]==0)
+		{
+			page*freePage=&pages[phyIdx-(USER_PAGE_POOL_START_ADDR>>12)];
+			if(freeList.tail!=NULL)
+			{
+				freeList.tail->next=freePage;
+				freeList.tail=freePage;
+			}
+			else
+			{
+				freeList.head=freeList.tail=freePage;
+			}
+			freeList.tail->next=NULL;
+			return 1;
+		}
+		
+	}
+	return 0;
+}

@@ -154,6 +154,7 @@ public:
 
 private:
 	unsigned long peAddress;
+public:
 	ImageNTHeader ntHeader;
  	ImageSectionHeader* sectionHeaders;
 };

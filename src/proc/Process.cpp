@@ -124,59 +124,6 @@ void Process::Sleep(unsigned long chan, int pri)
 	}
 }
 
-//void Process::Expand(unsigned int newSize)   // 物理内存空间扩大、缩小进程图像
-//{
-//	UserPageManager& userPgMgr = Kernel::Instance().GetUserPageManager();
-//	ProcessManager& procMgr = Kernel::Instance().GetProcessManager();
-//	User& u = Kernel::Instance().GetUser();
-//	Process* pProcess = u.u_procp;
-//
-//	unsigned int oldSize = pProcess->p_size;
-//	pProcess->p_size = newSize;
-//	unsigned long oldAddress = pProcess->p_addr;
-//	unsigned long newAddress;
-//
-//	/* 如果进程图像缩小，则释放多余的内存 */
-//	if ( oldSize >= newSize )
-//	{
-////		userPgMgr.FreeMemory(oldSize - newSize, oldAddress + newSize);
-//		for(unsigned long i=0;i<oldSize-newSize;i+=0x1000)
-//		{
-//			userPgMgr.FreeMemory(oldAddress+i);
-//		}
-//		return;
-//	}
-//
-//	/* 进程图像扩大，需要寻找一块大小newSize的连续内存区 */
-//	SaveU(u.u_rsav);
-//	newAddress = userPgMgr.AllocMemory(newSize);
-//	/* 分配内存失败，将进程暂时换出到交换区上，还没好  */
-//	if ( NULL == newAddress )
-//	{
-//		SaveU(u.u_ssav);
-//		procMgr.XSwap(pProcess, true, oldSize);
-//		pProcess->p_flag |= Process::SSWAP;
-//		procMgr.Swtch();
-//		/* no return */
-//	}
-//	/* 分配内存成功，将进程图像拷贝到新内存区，然后跳转到新内存区继续运行 */
-//	pProcess->p_addr = newAddress;
-//	for ( unsigned int i = 0; i < oldSize; i++ )
-//	{
-//		Utility::CopySeg(oldAddress + i, newAddress + i);
-//	}
-//
-//	/* 释放原来占用的内存区 */
-//	userPgMgr.FreeMemory(oldSize, oldAddress);
-//	
-//	X86Assembly::CLI();
-//	SwtchUStruct(pProcess);
-//	RetU();
-//	X86Assembly::STI();
-//
-//	// u.u_MemoryDescriptor.MapToPageTable();
-//} 
-
 void Process::Exit()
 {
 	int i;
@@ -214,15 +161,21 @@ void Process::Exit()
 	/* 将u区写入交换区，等待父进程做善后处理 */
 	SwapperManager& swapperMgr = Kernel::Instance().GetSwapperManager();
 	BufferManager& bufMgr = Kernel::Instance().GetBufferManager();
-	/* u区的大小不会超过512字节，所以只写入ppda区的前512字节，已囊括u结构的全部信息 */
-	int blkno = swapperMgr.AllocSwap(BufferManager::BUFFER_SIZE);
+	/* u区的大小超过512字节，必须分次写入和读出 */
+	int blkno = swapperMgr.AllocSwap();
 	if ( NULL == blkno )
 	{
 		Utility::Panic("Out of Swapper Space");
 	}
-	Buf* pBuf = bufMgr.GetBlk(DeviceManager::ROOTDEV, blkno);
-	Utility::DWordCopy((int *)&u, (int *)pBuf->b_addr, BufferManager::BUFFER_SIZE / sizeof(int));
-	bufMgr.Bwrite(pBuf);
+	for(unsigned int i=0;i<PageManager::PAGE_SIZE;i+=BufferManager::BUFFER_SIZE,blkno++)	//一个扇区512B
+	{
+		Buf* pBuf = bufMgr.GetBlk(DeviceManager::ROOTDEV, blkno);
+		Utility::DWordCopy((int *)((char*)&u+i), (int *)pBuf->b_addr, BufferManager::BUFFER_SIZE / sizeof(int));
+		bufMgr.Bwrite(pBuf);
+		//释放缓存块
+		bufMgr.Brelse(pBuf);
+	}
+	blkno-=8;	//后面要用到赋给current->p_addr
 
 	/* 释放内存资源 */
 	UserPageManager& userPageMgr = Kernel::Instance().GetUserPageManager();
@@ -230,37 +183,43 @@ void Process::Exit()
 	//清除数据段
 	unsigned int dataVirtualIdx=u.u_MemoryDescriptor.m_DataStartAddress%PageTable::SIZE_PER_PAGETABLE_MAP;
 	dataVirtualIdx/=userPageMgr.PAGE_SIZE;
-	for(unsigned int i=0;i<u.u_MemoryDescriptor.m_DataSize/userPageMgr.PAGE_SIZE;i++)
-	{
-		userPageMgr.FreeMemory(userPageTableArray->m_Entrys[dataVirtualIdx+i].m_PageBaseAddress<<12);
-		userPageTableArray->m_Entrys[dataVirtualIdx+i].m_Present=0;
-	}
+	u.u_MemoryDescriptor.FreePhyPage(dataVirtualIdx,u.u_MemoryDescriptor.m_DataSize,0);
+	//rdata段
+	unsigned int rdataStartIdx=(u.vm_list[u.RDATA_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
+	unsigned int bssStartIdx=(u.vm_list[u.BSS_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
+	unsigned int heapStartIdx=(u.vm_list[u.HEAP_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
+	u.u_MemoryDescriptor.FreePhyPage(rdataStartIdx,u.vm_list[u.RDATA_IDX].v_length,0);
+	u.u_MemoryDescriptor.FreePhyPage(bssStartIdx,u.vm_list[u.BSS_IDX].v_length,0);
+	u.u_MemoryDescriptor.FreePhyPage(heapStartIdx,u.vm_list[u.HEAP_IDX].v_length,0);
 	//清除栈段
-	for(unsigned int i=1;i<=u.u_MemoryDescriptor.m_StackSize/userPageMgr.PAGE_SIZE;i++)
-	{
-		userPageMgr.FreeMemory(userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-i].m_PageBaseAddress<<12);
-		userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-i].m_Present=0;
-	}
+	u.u_MemoryDescriptor.FreePhyPage(0,u.u_MemoryDescriptor.m_StackSize,1);
 
 	Process::ProcessState p_stat=u.u_procp->p_stat;
 	u.u_procp->p_stat=Process::SSTOP;
 	/* 释放该进程对共享正文段的引用 */
 	if ( u.u_procp->p_textp != NULL )
 	{
-		if(u.u_procp->p_textp->x_ccount>0)
+		if ( --u.u_procp->p_textp->x_count == 0 )
 		{
-			if(--u.u_procp->p_textp->x_ccount==0)
+			//通过内存中的页表释放所有已分配的物理页框(包括盘交换区上的)
+			unsigned int textStartIdx=u.vm_list[u.TEXT_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP/PageManager::PAGE_SIZE;
+			u.u_MemoryDescriptor.FreePhyPage(textStartIdx,u.u_procp->p_textp->x_size,0);
+			Kernel::Instance().GetFileManager().m_InodeTable->IPut(u.u_procp->p_textp->x_iptr);
+			u.u_procp->p_textp->x_iptr = NULL;
+		}
+		else
+		{
+			ProcessManager&processMgr=Kernel::Instance().GetProcessManager();
+			u.u_procp->p_textp->x_pgTable=NULL;
+			for(int i=0;i<processMgr.NPROC;i++)
 			{
-				unsigned int textVirtualIdx=u.u_MemoryDescriptor.m_TextStartAddress%PageTable::SIZE_PER_PAGETABLE_MAP;
-				textVirtualIdx/=userPageMgr.PAGE_SIZE;
-				for(unsigned int i=0;i<u.u_MemoryDescriptor.m_TextSize/userPageMgr.PAGE_SIZE;i++)
+				if(processMgr.process[i].p_textp==u.u_procp->p_textp&&processMgr.process[i].p_stat!=Process::SSTOP)
 				{
-					userPageMgr.FreeMemory(userPageTableArray->m_Entrys[textVirtualIdx+i].m_PageBaseAddress<<12);
-					userPageTableArray->m_Entrys[textVirtualIdx+i].m_Present=0;
+					u.u_procp->p_textp->x_pgTable=processMgr.process[i].p_pgTable;
+					break;
 				}
 			}
 		}
-		u.u_procp->p_textp->XFree();
 		u.u_procp->p_textp = NULL;
 	}
 	u.u_procp->p_stat=p_stat;
@@ -346,7 +305,6 @@ void Process::Clone(Process& proc)
 	if ( proc.p_textp != 0 )
 	{
 		proc.p_textp->x_count++;
-		proc.p_textp->x_ccount++;
 	}
 
 	/* 增加对当前工作目录的引用计数 */
@@ -361,19 +319,30 @@ void Process::SStack()
 	unsigned int change = 4096;
 
 	md.m_StackSize += change;
-	unsigned int newSize = ProcessManager::USIZE + md.m_DataSize + md.m_StackSize;
-	(void)newSize;
-
-	if ( false == u.u_MemoryDescriptor.CheckUserSpaceSize(md.m_TextStartAddress, md.m_TextSize, md.m_DataStartAddress, md.m_DataSize, md.m_StackSize) )
+	u.vm_list[u.STACK_IDX].v_start-=change;
+	u.vm_list[u.STACK_IDX].v_length+=change;
+	
+	if ( false == u.u_MemoryDescriptor.CheckUserSpaceSize(u.vm_list) )
 	{
+		//rollback
+		md.m_StackSize -= change;
+		u.vm_list[u.STACK_IDX].v_start+=change;
+		u.vm_list[u.STACK_IDX].v_length-=change;
 		return;   // out of virtual space. fail
 	}
 
-//	this->Expand(newSize);
-//	u.u_MemoryDescriptor.EstablishUserPageTable(md.m_TextStartAddress, md.m_TextSize, md.m_DataStartAddress, md.m_DataSize, md.m_StackSize);
-//	u.u_MemoryDescriptor.MapToPageTable();
 	UserPageManager&userPageMagager=Kernel::Instance().GetUserPageManager();
-	unsigned int phyStackIdx=userPageMagager.AllocMemory(userPageMagager.USER_PAGE_POOL_START_ADDR,userPageMagager.USER_END_ADDR)/userPageMagager.PAGE_SIZE;
+	unsigned int phyStackIdx=userPageMagager.AllocMemory()/userPageMagager.PAGE_SIZE;
+	if(phyStackIdx==0)
+	{
+		//rollback
+		md.m_StackSize -= change;
+		u.vm_list[u.STACK_IDX].v_start+=change;
+		u.vm_list[u.STACK_IDX].v_length-=change;
+		u.u_error = User::ENOMEM;
+		Diagnose::Write("stack expand failed!u.u_error = %d\n",u.u_error);
+		return;
+	}
 	unsigned int virtualStackIdx=PageTable::ENTRY_CNT_PER_PAGETABLE-md.m_StackSize/userPageMagager.PAGE_SIZE;
 	if(virtualStackIdx<PageTable::ENTRY_CNT_PER_PAGETABLE)
 	{
@@ -382,6 +351,7 @@ void Process::SStack()
 		userPageTableArray->m_Entrys[virtualStackIdx].m_ReadWriter=0x1;
 		userPageTableArray->m_Entrys[virtualStackIdx].m_UserSupervisor=0x1;
 		userPageTableArray->m_Entrys[virtualStackIdx].m_PageBaseAddress=phyStackIdx;
+		userPageTableArray->m_Entrys[virtualStackIdx].m_Used=1;
 	}
 
 	FlushPageDirectory((unsigned long)&Machine::Instance().GetPageDirectory()-Machine::KERNEL_SPACE_START_ADDRESS);
@@ -396,50 +366,47 @@ void Process::SBreak()
 	unsigned int newEnd = u.u_arg[0];
 	if (newEnd == 0)
 	{
-		u.u_ar0[User::EAX] = md.m_DataStartAddress + md.m_DataSize;
+		u.u_ar0[User::EAX] = u.vm_list[u.HEAP_IDX].v_start+u.vm_list[u.HEAP_IDX].v_length;
 		return;  // 返回当前数据段之后，第一个字节的地址
 	}
 
-	unsigned long newSize = newEnd - md.m_DataStartAddress;  // 数据段的新长度
-	if ( false == u.u_MemoryDescriptor.CheckUserSpaceSize(md.m_TextStartAddress, md.m_TextSize, md.m_DataStartAddress, newSize, md.m_StackSize) )
+	unsigned long newSize = newEnd - u.vm_list[u.HEAP_IDX].v_start;  // 堆段的新长度
+	newSize=(newSize+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE;	//按页向上取整
+	newSize<<=12;
+	unsigned long oldSize=u.vm_list[u.HEAP_IDX].v_length;
+	u.vm_list[u.HEAP_IDX].v_length=newSize;
+	if ( false == u.u_MemoryDescriptor.CheckUserSpaceSize(u.vm_list) )
 	{
+		//rollback
+		u.vm_list[u.HEAP_IDX].v_length=oldSize;
 		return;   // out of virtual space. fail
 	}
-
-	// 分配物理内存，复制进程图像
 	UserPageManager&userPageManager=Kernel::Instance().GetUserPageManager();
 	PageTable*userPageTableArray=md.GetUserPageTableArray();
-	newSize=(newSize+userPageManager.PAGE_SIZE-1)/userPageManager.PAGE_SIZE;	//按页向上取整
-	newSize<<=12;
-	int change = (int)newSize - (int)md.m_DataSize;    // 数据段长度变化量
-	md.m_DataSize = newSize;  // 数据段新长度写进内存描述符
-	unsigned int m_DataEndIdx=(md.m_DataStartAddress+md.m_DataSize)%PageTable::SIZE_PER_PAGETABLE_MAP;
-	m_DataEndIdx/=userPageManager.PAGE_SIZE;
-	if ( change < 0 )  // 数据段缩小
+	int change = (int)newSize - (int)oldSize;    // 堆段长度变化量
+	unsigned int m_HeapEndIdx=(u.vm_list[u.HEAP_IDX].v_start+u.vm_list[u.HEAP_IDX].v_length)%PageTable::SIZE_PER_PAGETABLE_MAP;
+	m_HeapEndIdx/=userPageManager.PAGE_SIZE;
+	if ( change < 0 )  // 堆段缩小
 	{
-		for(int i=0;i+change/(int)userPageManager.PAGE_SIZE<0;i++)
-		{
-			//释放内存
-			unsigned long phyAddr=(unsigned long)userPageTableArray->m_Entrys[m_DataEndIdx+i].m_PageBaseAddress<<12;
-			userPageManager.FreeMemory(phyAddr);
-			userPageTableArray->m_Entrys[m_DataEndIdx+i].m_Present=0;	//禁用该映射
-		}
+		change=0-change;
+		u.u_MemoryDescriptor.FreePhyPage(m_HeapEndIdx,change,0);
 	}
-	else if ( change > 0 )  // 数据段扩大
+	else if ( change > 0 )  // 堆段扩大
 	{
 		for(int i=change/userPageManager.PAGE_SIZE;i>0;i--)
 		{
 			//分配内存
-			unsigned long phyAddr=userPageManager.AllocMemory(userPageManager.USER_PAGE_POOL_START_ADDR,userPageManager.USER_END_ADDR);
+			unsigned long phyAddr=userPageManager.AllocMemory();
 			unsigned int phyIdx=phyAddr/userPageManager.PAGE_SIZE;
 			//建立映射
-			userPageTableArray->m_Entrys[m_DataEndIdx-i].m_PageBaseAddress=phyIdx;
-			userPageTableArray->m_Entrys[m_DataEndIdx-i].m_Present=1;
-			userPageTableArray->m_Entrys[m_DataEndIdx-i].m_ReadWriter=1;
-			userPageTableArray->m_Entrys[m_DataEndIdx-i].m_UserSupervisor=1;
+			userPageTableArray->m_Entrys[m_HeapEndIdx-i].m_PageBaseAddress=phyIdx;
+			userPageTableArray->m_Entrys[m_HeapEndIdx-i].m_Present=1;
+			userPageTableArray->m_Entrys[m_HeapEndIdx-i].m_ReadWriter=1;
+			userPageTableArray->m_Entrys[m_HeapEndIdx-i].m_UserSupervisor=1;
+			userPageTableArray->m_Entrys[m_HeapEndIdx-i].m_Used=1;
 		}
 	}
-	u.u_ar0[User::EAX] = md.m_DataStartAddress + md.m_DataSize;
+	u.u_ar0[User::EAX] = u.vm_list[u.HEAP_IDX].v_start+u.vm_list[u.HEAP_IDX].v_length;
 }
 
 void Process::PSignal( int signal )

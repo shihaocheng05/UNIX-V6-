@@ -33,17 +33,17 @@ public:
 	 * 
 	 * 返回值: 分配到的交换区起始盘块号，返回0表示分配失败。
 	 */
-	int AllocSwap(unsigned long size);
+	unsigned int AllocSwap();
 	/* 
 	 * 交换区空间释放
 	 * 
-	 * size:  释放交换区大小(单位: byte)，实际释放的交换区大小以
+	 * size:  释放交换区大小，每次一个物理页框，实际释放的交换区大小以
 	 * 磁盘块为单位，根据参数size大小，向上取整至磁盘块大小的整数倍。
 	 * startBlock: 释放交换区起始盘块号
 	 * 
 	 * 返回值: 释放交换区操作总能成功，返回0，但通常忽略其返回值。
 	 */
-	int FreeSwap(unsigned long size, int startBlock);
+	unsigned int FreeSwap(unsigned int startBlock);
 
 private:
 	SwapperManager();
@@ -53,6 +53,7 @@ public:
 	MapNode map[SwapperManager::SWAPPER_MAP_ARRAY_SIZE];
 	/*需要维护SwapPage数组*/
 	SwapPage SwapperPage[SWAPPER_PAGE_NUM];
+	FreeSwapList freeSwapList;
 private:
 	Allocator* m_pAllocator;
 };

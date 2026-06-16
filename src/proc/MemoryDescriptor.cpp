@@ -4,6 +4,7 @@
 #include "Machine.h"
 #include "PageDirectory.h"
 #include "Video.h"
+#include "SwapperManager.h"
 
 PageDirectory* MemoryDescriptor::Initialize()
 {
@@ -27,6 +28,7 @@ PageDirectory* MemoryDescriptor::Initialize()
 		entry.m_GlobalPage = 0;
 		entry.m_ForSystemUser = 0;
 		entry.m_PageBaseAddress = 0;
+		entry.m_Used=0;
 	}
 	//分配一个页目录进行初始化，并返回页目录的起始虚地址
 	const unsigned int kPageTableIdx=Machine::KERNEL_SPACE_START_ADDRESS/PageTable::SIZE_PER_PAGETABLE_MAP;
@@ -134,12 +136,22 @@ unsigned long MemoryDescriptor::GetStackSize()
 	return this->m_StackSize;
 }
 
-bool MemoryDescriptor::CheckUserSpaceSize( unsigned long textVirtualAddress, unsigned long textSize, unsigned long dataVirtualAddress, unsigned long dataSize, unsigned long stackSize )
+bool MemoryDescriptor::CheckUserSpaceSize( vm_area vm_list[] )
 {
-	User& u = Kernel::Instance().GetUser();
+	User&u=Kernel::Instance().GetUser();
+	bool legalFile=1;
+	unsigned int totalLength=vm_list[u.HEAP_IDX].v_length+vm_list[u.STACK_IDX].v_length;
+	for(unsigned int i=0;i<u.BSS_IDX;i++)
+	{
+		if(vm_list[i].v_start+vm_list[i].v_length>vm_list[i+1].v_start)
+		{
+			legalFile=0;
+		}
+		totalLength+=vm_list[i].v_length;
+	}
+	totalLength+=vm_list[u.BSS_IDX].v_length;
 
-	/* 如果超出允许的用户程序最大8M的地址空间限制 */
-	if ( textSize + dataSize + stackSize  + PageManager::PAGE_SIZE > USER_SPACE_SIZE - textVirtualAddress)
+	if(totalLength+PageManager::PAGE_SIZE>MemoryDescriptor::USER_SPACE_SIZE-0x400000||!legalFile)
 	{
 		u.u_error = User::ENOMEM;
 		Diagnose::Write("u.u_error = %d\n",u.u_error);
@@ -150,44 +162,65 @@ bool MemoryDescriptor::CheckUserSpaceSize( unsigned long textVirtualAddress, uns
 
 /* 因为需要供Newproc调用，所以只写页表，不建立地址映射关系 */
 /*改：只会被Exec调用，并既写页表且建立映射关系*/
-void MemoryDescriptor::EstablishUserPageTable( unsigned long textVirtualAddress, unsigned long textSize, unsigned long dataVirtualAddress, unsigned long dataSize,int shared,PageDirectory*p_pgTable)
+/*二改：vm版本中，不再需要为正文段急性分配内存，而使用缺页异常处理程序进行惰性分配。此时EstablishUserPageTable函数只对正文段初始化或者对所有短进行置NULL操作*/
+void MemoryDescriptor::EstablishUserPageTable(vm_area vm_list[],int shared,PageDirectory*p_pgTable)
 {
 	User& u = Kernel::Instance().GetUser();
 	PageTable*userPageTableArray=u.u_MemoryDescriptor.m_UserPageTableArray;
 	UserPageManager&userPageManager=Kernel::Instance().GetUserPageManager();
-	unsigned int textVirtualIdx=(textVirtualAddress%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
-	unsigned int dataVirtualIdx=(dataVirtualAddress%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
-	unsigned long textPageNum=(textSize+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE;
-	unsigned long dataPageNum=(dataSize+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE;
+	//MemoryDescriptor和vm_list应当解耦，所以这里没有使用简单的循环来直接进行页表置NULL
+	unsigned int textVirtualIdx=(vm_list[u.TEXT_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
+	unsigned int dataVirtualIdx=(vm_list[u.DATA_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
+	unsigned int rdataVirtualIdx=(vm_list[u.RDATA_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
+	unsigned int bssVirtualIdx=(vm_list[u.BSS_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
+	unsigned int heapVirtualIdx=(vm_list[u.HEAP_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
+	unsigned int stackVirtualIdx=(vm_list[u.STACK_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
+	unsigned int textPageNum=(vm_list[u.TEXT_IDX].v_length+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE;
+	unsigned int dataPageNum=(vm_list[u.DATA_IDX].v_length+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE;
+	unsigned int rdataPageNum=(vm_list[u.RDATA_IDX].v_length+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE;
+	unsigned int bssPageNum=(vm_list[u.BSS_IDX].v_length+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE;
+	unsigned int heapPageNum=(vm_list[u.HEAP_IDX].v_length+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE;
+	unsigned int stackPageNum=(vm_list[u.STACK_IDX].v_length+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE;
 	if(shared)
 	{
 		PageTable*oldUserPageTableArray=(PageTable*)((p_pgTable->m_Entrys[1].m_PageTableBaseAddress<<12)+Machine::KERNEL_SPACE_START_ADDRESS);
 		for(unsigned int i=0;i<textPageNum;i++)
 		{
-			userPageTableArray->m_Entrys[textVirtualIdx+i].m_Present=1;
+			userPageTableArray->m_Entrys[textVirtualIdx+i].m_Present=oldUserPageTableArray->m_Entrys[textVirtualIdx+i].m_Present;
 			userPageTableArray->m_Entrys[textVirtualIdx+i].m_ReadWriter=0;
 			userPageTableArray->m_Entrys[textVirtualIdx+i].m_UserSupervisor=1;
 			userPageTableArray->m_Entrys[textVirtualIdx+i].m_PageBaseAddress=oldUserPageTableArray->m_Entrys[textVirtualIdx+i].m_PageBaseAddress;
+			userPageTableArray->m_Entrys[textVirtualIdx+i].m_Used=oldUserPageTableArray->m_Entrys[textVirtualIdx+i].m_Used;
 		}
 	}
 	else
 	{
+		//若当前进程的正文段不被共享，则将页表对应的项置为NULL
 		for(unsigned int i=0;i<textPageNum;i++)
 		{
-			unsigned int textPhyIdx=userPageManager.AllocMemory(userPageManager.USER_PAGE_POOL_START_ADDR,userPageManager.USER_END_ADDR)/PageManager::PAGE_SIZE;
-			userPageTableArray->m_Entrys[textVirtualIdx+i].m_Present=1;
-			userPageTableArray->m_Entrys[textVirtualIdx+i].m_ReadWriter=0;
-			userPageTableArray->m_Entrys[textVirtualIdx+i].m_UserSupervisor=1;
-			userPageTableArray->m_Entrys[textVirtualIdx+i].m_PageBaseAddress=textPhyIdx;
+			userPageTableArray->m_Entrys[textVirtualIdx+i].m_Used=0;
 		}
 	}
 	for(unsigned int i=0;i<dataPageNum;i++)
 	{
-		unsigned int dataPhyIdx=userPageManager.AllocMemory(userPageManager.USER_PAGE_POOL_START_ADDR,userPageManager.USER_END_ADDR)/PageManager::PAGE_SIZE;
-		userPageTableArray->m_Entrys[dataVirtualIdx+i].m_Present=1;
-		userPageTableArray->m_Entrys[dataVirtualIdx+i].m_ReadWriter=1;
-		userPageTableArray->m_Entrys[dataVirtualIdx+i].m_UserSupervisor=1;
-		userPageTableArray->m_Entrys[dataVirtualIdx+i].m_PageBaseAddress=dataPhyIdx;
+		userPageTableArray->m_Entrys[dataVirtualIdx+i].m_Used=0;
+	}
+	for(unsigned int i=0;i<rdataPageNum;i++)
+	{
+		userPageTableArray->m_Entrys[rdataVirtualIdx+i].m_Used=0;
+	}
+	for(unsigned int i=0;i<bssPageNum;i++)
+	{
+		userPageTableArray->m_Entrys[bssVirtualIdx+i].m_Used=0;
+	}
+	for(unsigned int i=0;i<heapPageNum;i++)
+	{
+		userPageTableArray->m_Entrys[heapVirtualIdx+i].m_Used=0;
+	}
+	//stack是特例，最后一页fakestack已经映射完毕
+	for(unsigned int i=0;i<stackPageNum-1;i++)
+	{
+		userPageTableArray->m_Entrys[stackVirtualIdx+i].m_Used=0;
 	}
 }
 
@@ -197,31 +230,25 @@ void MemoryDescriptor::CopyUserPageTable(PageTable* pgTable,unsigned int Page[])
 	ClearUserPageTable();
 	User& u=Kernel::Instance().GetUser();
 	PageTableEntry*entry=pgTable->m_Entrys;
-	PageTableEntry*new_entry=(PageTableEntry*)this->m_UserPageTableArray;
-
-	  /* 计算正文段在此页表中的索引范围。                                                                                                                
-      * 正文段由 x_ccount 管理生命周期，不应参与 Page[] COW 引用计数，                                                                                  
-      * 否则每次 Fork 给 Page[text_pfn]++，但只在 Shell 最终 Exit                                                                                       
-      * (x_ccount→0) 时 FreeMemory 一次，Page[] 引用计数净泄露 */                                                                                       
-      unsigned int textStartIdx = (u.u_MemoryDescriptor.m_TextStartAddress % PageTable::SIZE_PER_PAGETABLE_MAP) / PageManager::PAGE_SIZE;                
-      unsigned int textPageNum = (u.u_MemoryDescriptor.m_TextSize + PageManager::PAGE_SIZE - 1) / PageManager::PAGE_SIZE;   
-	
+	PageTableEntry*new_entry=(PageTableEntry*)this->m_UserPageTableArray;                                                                                    
+    unsigned int textStartIdx=(u.vm_list[u.TEXT_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;                
+    unsigned int textPageNum=(u.vm_list[u.TEXT_IDX].v_length+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE;   
+	unsigned int rdataStartIdx=(u.vm_list[u.RDATA_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
+	unsigned int rdataPageNum=(u.vm_list[u.RDATA_IDX].v_length+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE;
+	//完全复制父进程PTE
 	for(unsigned i=0;i<PageTable::ENTRY_CNT_PER_PAGETABLE;i++)
 	{
 		new_entry[i].m_Present=entry[i].m_Present;
 		new_entry[i].m_UserSupervisor=entry[i].m_UserSupervisor;
-		if(entry[i].m_Present)
+		bool isText=(i>=textStartIdx&&i<(textStartIdx+textPageNum))||(i>=rdataStartIdx&&i<(rdataStartIdx+rdataPageNum));
+		if(entry[i].m_Present&&!isText)//若相应物理页在内存，COW
 		{
-			/* 正文段页：生命周期由 p_textp->x_ccount 管理，不使用 Page[] COW 计数 */                                                                      
-      		bool isTextPage = (u.u_procp->p_textp != NULL)&& (i >= textStartIdx)&& (i < textStartIdx + textPageNum);                                                                                            
-      		if (!isTextPage)                                                                                                                               
-      		{                                                                                                                                              
-      		  Page[entry[i].m_PageBaseAddress]++;                                                                                                          
-      		}                                                    
+			Page[entry[i].m_PageBaseAddress]++;
 			entry[i].m_ReadWriter=false;
 		}
 		new_entry[i].m_ReadWriter=entry[i].m_ReadWriter;
 		new_entry[i].m_PageBaseAddress=entry[i].m_PageBaseAddress;
+		new_entry[i].m_Used=entry[i].m_Used;
 	}
 	FlushPageDirectory((unsigned long)&Machine::Instance().GetPageDirectory()-Machine::KERNEL_SPACE_START_ADDRESS);
 }
@@ -252,64 +279,104 @@ void MemoryDescriptor::ClearUserPageTable()
 		pUserPageTable->m_Entrys[j].m_ReadWriter = 0;
 		pUserPageTable->m_Entrys[j].m_UserSupervisor = 1;
 		pUserPageTable->m_Entrys[j].m_PageBaseAddress = 0;
+		pUserPageTable->m_Entrys[j].m_Used=0;
 	}
 
 }
 
-/*
-void MemoryDescriptor::MapToPageTable()
+void MemoryDescriptor::FreePhyPage(unsigned int sectionStartIdx,unsigned long sectionSize,bool isStack)
 {
-	User& u = Kernel::Instance().GetUser();
-
-	if(u.u_MemoryDescriptor.m_UserPageTableArray == NULL)
-		return;
-
-	PageTable* pUserPageTable = Machine::Instance().GetUserPageTableArray();
-	unsigned int textAddress = 0;
-	if ( u.u_procp->p_textp != NULL )
+	PageTable*userPageTableArray=this->GetUserPageTableArray();
+	UserPageManager&userPgMgr=Kernel::Instance().GetUserPageManager();
+	SwapperManager&swpMgr=Kernel::Instance().GetSwapperManager();
+	if(!isStack)
 	{
-		textAddress = u.u_procp->p_textp->x_caddr;
-	}
-
-	for (unsigned int i = 0; i < Machine::USER_PAGE_TABLE_CNT; i++)
-	{
-		for ( unsigned int j = 0; j < PageTable::ENTRY_CNT_PER_PAGETABLE; j++ )
+		for(unsigned int i=0;i<(sectionSize+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE;i++)
 		{
-			pUserPageTable[i].m_Entrys[j].m_Present = 0;   //先清0
-
-			if ( 1 == this->m_UserPageTableArray[i].m_Entrys[j].m_Present )
+			if(userPageTableArray->m_Entrys[sectionStartIdx+i].m_Used==1)
 			{
-				pUserPageTable[i].m_Entrys[j].m_Present = 1;
-				pUserPageTable[i].m_Entrys[j].m_ReadWriter = this->m_UserPageTableArray[i].m_Entrys[j].m_ReadWriter;
-				pUserPageTable[i].m_Entrys[j].m_PageBaseAddress = this->m_UserPageTableArray[i].m_Entrys[j].m_PageBaseAddress;
+				if(userPageTableArray->m_Entrys[sectionStartIdx+i].m_Present==1)
+				{
+					unsigned long phyAddr=(unsigned long)(userPageTableArray->m_Entrys[sectionStartIdx+i].m_PageBaseAddress<<12);
+					userPgMgr.FreeMemory(phyAddr);
+				}
+				else
+				{
+					swpMgr.FreeSwap(userPageTableArray->m_Entrys[sectionStartIdx+i].m_PageBaseAddress);
+				}
+				userPageTableArray->m_Entrys[sectionStartIdx+i].m_Used=0;
 			}
 		}
 	}
+	else
+	{
+		for(unsigned int i=0;i<(sectionSize+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE;i++)
+		{
+			if(userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_Used==1)
+			{
+				if(userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_Present==1)
+				{
+					unsigned long phyIdx=(unsigned long)userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_PageBaseAddress<<12;
+					userPgMgr.FreeMemory(phyIdx);
+				}
+				else
+				{
+					swpMgr.FreeSwap(userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_PageBaseAddress);
+				}
+				userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_Used=0;	//表示NULL
+			}
+		}
+	}
+}
 
-	FlushPageDirectory();
-}*/
-
-//void MemoryDescriptor::MapToPageTable()
-//{
-//	User& u = Kernel::Instance().GetUser();
-//	Machine& machine = Machine::Instance();
-//	unsigned long pgDirPhys = (unsigned long)(u.u_procp->p_pgTable) - Machine::KERNEL_SPACE_START_ADDRESS;
-//
-//    unsigned long phyFrame = (unsigned long)(u.u_MemoryDescriptor.m_UserPageTableArray);  // 相对表（现在已经是页表了）首地址，虚地址
-//
-//	if(phyFrame == NULL)
-//		return;
-//	else
-//		phyFrame = (phyFrame - 0xC0000000) >> 12;   // 相对表（现在已经是页表了）物理页框号
-//
-//	Diagnose::Write("Start Address of Process's 1# User Page Table: %x，%x\n",(unsigned long)(u.u_MemoryDescriptor.m_UserPageTableArray),phyFrame);
-//
-//	Machine::Instance().GetPageDirectory().m_Entrys[0x1].m_UserSupervisor = 1;
-//	Machine::Instance().GetPageDirectory().m_Entrys[0x1].m_Present = 1;
-//	Machine::Instance().GetPageDirectory().m_Entrys[0x1].m_ReadWriter = 1;
-//	Machine::Instance().GetPageDirectory().m_Entrys[0x1].m_PageTableBaseAddress = phyFrame;
-//
-//	FlushPageDirectory(pgDirPhys);
-//	PageDirectory * pPageDirectory = & machine.GetPageDirectory();
-//	Diagnose::Write("PageTable used by CPU %x\n", Machine::Instance().GetPageDirectory().m_Entrys[0].m_PageTableBaseAddress);
-//}
+page* MemoryDescriptor::selectVictim(PageTable*userPageTableArray)/*先clock选取一个RW页放在磁盘中（在COW实现中，RW页一定私有。因为若RW页被子进程复制，该pte会改为RO）*/
+{
+	UserPageManager&userPgMgr=Kernel::Instance().GetUserPageManager();
+	PageAllocator*pAllocator=userPgMgr.m_pAllocator;
+	page*selected=NULL;
+	//先找A==0和D==0的
+	for(unsigned int i=0;i<PageTable::ENTRY_CNT_PER_PAGETABLE;i++,current++)
+	{
+		current%=PageTable::ENTRY_CNT_PER_PAGETABLE;
+		if(pAllocator->Page[userPageTableArray->m_Entrys[current].m_PageBaseAddress]>1) continue;
+		if(userPageTableArray->m_Entrys[current].m_Used==1&&userPageTableArray->m_Entrys[current].m_Present==1&&userPageTableArray->m_Entrys[current].m_ReadWriter==1)
+		{
+			if(userPageTableArray->m_Entrys[current].m_Accessed==0&&userPageTableArray->m_Entrys[current].m_Dirty==0)
+			{
+				unsigned int pagesIdx=((userPageTableArray->m_Entrys[current].m_PageBaseAddress<<12)-userPgMgr.USER_PAGE_POOL_START_ADDR)>>12;
+				selected=&userPgMgr.pages[pagesIdx];
+				current++;
+				current%=PageTable::ENTRY_CNT_PER_PAGETABLE;
+				return selected;
+			}
+		}
+	}
+	//找不到，找A==0的，总能找到
+	while(selected==NULL)
+	{
+		current%=PageTable::ENTRY_CNT_PER_PAGETABLE;
+		if(pAllocator->Page[userPageTableArray->m_Entrys[current].m_PageBaseAddress]>1)		//缺陷：没有考虑整个页表的物理页框引用次数都大于1的情况，此时会导致无法退出。
+		{
+			current++;
+			continue;
+		}
+		if(userPageTableArray->m_Entrys[current].m_Used==1&&userPageTableArray->m_Entrys[current].m_Present==1&&userPageTableArray->m_Entrys[current].m_ReadWriter==1)
+		{
+			if(userPageTableArray->m_Entrys[current].m_Accessed==1)
+			{
+				userPageTableArray->m_Entrys[current].m_Accessed=0;
+			}
+			else
+			{
+				unsigned int pagesIdx=((userPageTableArray->m_Entrys[current].m_PageBaseAddress<<12)-userPgMgr.USER_PAGE_POOL_START_ADDR)>>12;
+				selected=&userPgMgr.pages[pagesIdx];
+				current++;
+				current%=PageTable::ENTRY_CNT_PER_PAGETABLE;
+				return selected;
+			}
+		}
+		current++;
+	}
+	
+	return selected;
+}

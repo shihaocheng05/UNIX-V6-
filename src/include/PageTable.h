@@ -12,8 +12,9 @@ struct PageTableEntry
 	unsigned char	m_Dirty : 1;
 	unsigned char	m_PageTableAttribueIndex : 1;
 	unsigned char	m_GlobalPage : 1;
-	unsigned char	m_ForSystemUser : 3;
-	unsigned int	m_PageBaseAddress : 20;		//P==1时是物理页框号，P==0时是盘交换区块号（依然是4096B为单位，方便和物理页框兼容）
+	unsigned char 	m_Used:1;
+	unsigned char	m_ForSystemUser : 2;
+	unsigned int	m_PageBaseAddress : 20;		//P==1时是物理页框号，P==0时是盘交换区的扇区号
 }__attribute__((packed));
 
 

@@ -145,6 +145,7 @@ public:
 	int		i_addr[10];		/* 用于文件逻辑块好和物理块好转换的基本索引表 */
 	
 	int		i_lastr;		/* 存放最近一次读取文件的逻辑块号，用于判断是否需要预读 */
+	unsigned int i_index;	/*在m_Inode中的索引*/
 };
 
 

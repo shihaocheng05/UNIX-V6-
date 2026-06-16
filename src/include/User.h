@@ -112,6 +112,13 @@ public:
 	/*vm新增结构*/
 	vm_area vm_list[VM_AREA_MAX];
 	int vm_count;
+	//hardcode顺序
+	static const unsigned int TEXT_IDX=0;
+    static const unsigned int DATA_IDX=1;
+    static const unsigned int RDATA_IDX=2;
+    static const unsigned int BSS_IDX=3;
+    static const unsigned int HEAP_IDX=4;
+    static const unsigned int STACK_IDX=5;
 
 	/* 系统调用相关成员 */
 	unsigned int	*u_ar0;		/* 指向核心栈现场保护区中EAX寄存器
