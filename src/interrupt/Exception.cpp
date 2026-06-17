@@ -6,6 +6,7 @@
 #include "RadixTreeNode.h"
 #include "KernelAllocator.h"
 #include "Utility.h"
+#include "Assembly.h"
 
 /* 
  * 声明INT 0 - INT 31号异常在IDT中的入口函数(Entrance)
@@ -259,7 +260,6 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 	MemoryDescriptor& md = u.u_MemoryDescriptor;
 	UserPageManager& userPgMgr=Kernel::Instance().GetUserPageManager();
 	PageTable*userPageTableArray=md.GetUserPageTableArray();
-	KernelAllocator&kAllocator=Kernel::Instance().GetKernelAllocator();
 	SwapperManager&swpMgr=Kernel::Instance().GetSwapperManager();
 	BufferManager&bfMgr=Kernel::Instance().GetBufferManager();
 
@@ -273,7 +273,7 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 		unsigned int vm_id=VM_AREA_MAX;	//随便设置一个越界的索引
 		for(unsigned int i=0;i<=u.STACK_IDX;i++)
 		{
-			if(cr2>=u.vm_list[i].v_start&&cr2<=u.vm_list[i].v_start+u.vm_list[i].v_length)
+			if(cr2>=u.vm_list[i].v_start&&cr2<=u.vm_list[i].v_start+u.vm_list[i].f_length)//不应该是加虚空间长度，应该加文件中的实际长度
 			{
 				vm_id=i;
 			}
@@ -282,6 +282,7 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 		{
 			if(vm_id==u.TEXT_IDX||vm_id==u.RDATA_IDX)	//代码段或RDATA
 			{
+				Diagnose::Write("Enter text switch!\n");
 				unsigned int virtualIdx=(cr2-0x400000)>>12;	//在1#用户页表中的虚拟页框号
 				unsigned int f_offset=(cr2-u.vm_list[vm_id].v_start)/PageManager::PAGE_SIZE*PageManager::PAGE_SIZE;		//相对于段sectionHeader->PointerToRawData的偏移量，向下取整（因为一页一页读），能够让一页的内容共享同一缓存
 				f_offset+=u.vm_list[vm_id].f_offset;	//在文件中的真实偏移量
@@ -293,19 +294,21 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 				leaf_node=radix_tree_node::EstablishPathToTrueLeaf(leaf_node,inode_id,f_offset);//建立到真正叶子的路径
 				if(leaf_node->slot[f_offset&((1UL<<8)-1)]==NULL)	//该页没有缓存，需要从inode取
 				{
-					//分配一页物理页
+					//分配一页物理页并写PTE
 					unsigned long phyAddr=userPgMgr.AllocMemory();
 					userPageTableArray->m_Entrys[virtualIdx].m_Accessed=1;
 					userPageTableArray->m_Entrys[virtualIdx].m_Present=1;
 					userPageTableArray->m_Entrys[virtualIdx].m_Used=1;
 					userPageTableArray->m_Entrys[virtualIdx].m_ReadWriter=1;	//写RO段，先改成RW
 					userPageTableArray->m_Entrys[virtualIdx].m_PageBaseAddress=phyAddr>>12;
-					//立即读入
+					userPageTableArray->m_Entrys[virtualIdx].m_UserSupervisor = 1;
+					FlushPageDirectory((unsigned long)&Machine::Instance().GetPageDirectory()- Machine::KERNEL_SPACE_START_ADDRESS);
+					//立即读入（这里虽然是读整页，但是上面约束了文件中实际长度，因此读的也一定是有效内容）
 					u.u_IOParam.m_Base=(unsigned char*)(cr2&0xFFFFF000);
 					u.u_IOParam.m_Offset=readOffset;
 					u.u_IOParam.m_Count=PageManager::PAGE_SIZE;
 					current->p_textp->x_iptr->ReadI();
-					//初始化
+					//维护page结构体，初始化
 					unsigned int pagesIdx=(phyAddr-userPgMgr.USER_PAGE_POOL_START_ADDR)>>12;
 					page*sharedPage=&userPgMgr.pages[pagesIdx];
 					sharedPage->inode_id=inode_id;
@@ -316,6 +319,7 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 					leaf_node->count++;
 					//改回RO
 					userPageTableArray->m_Entrys[virtualIdx].m_ReadWriter=0;
+					FlushPageDirectory((unsigned long)&Machine::Instance().GetPageDirectory()- Machine::KERNEL_SPACE_START_ADDRESS);
 				}
 				else	//该页有缓存，直接写PTE
 				{
@@ -328,10 +332,13 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 					userPageTableArray->m_Entrys[virtualIdx].m_Used=1;
 					userPageTableArray->m_Entrys[virtualIdx].m_ReadWriter=0;
 					userPageTableArray->m_Entrys[virtualIdx].m_PageBaseAddress=phyAddr>>12;
+					userPageTableArray->m_Entrys[virtualIdx].m_UserSupervisor = 1;
+					FlushPageDirectory((unsigned long)&Machine::Instance().GetPageDirectory()- Machine::KERNEL_SPACE_START_ADDRESS);
 				}
 			}
 			else if(vm_id==u.DATA_IDX)
 			{
+				Diagnose::Write("Enter data switch!\n");
 				unsigned int virtualIdx=(cr2-0x400000)>>12;	//在1#用户页表中的虚拟页框号
 				unsigned int f_offset=(cr2-u.vm_list[vm_id].v_start)/PageManager::PAGE_SIZE*PageManager::PAGE_SIZE;		//相对于段sectionHeader->PointerToRawData的偏移量，向下取整（因为一页一页读），能够让一页的内容共享同一缓存
 				f_offset+=u.vm_list[vm_id].f_offset;	//在文件中的真实偏移量
@@ -375,10 +382,14 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 					else	//P==0，从磁盘上读入。在目前的设计中不可能实现，因为换出的永远是进程的私有页，RO页不会被换出。若RO被换入，则后面还会引发一次COW缺页异常
 					{
 						unsigned int base=userPageTableArray->m_Entrys[virtualIdx].m_PageBaseAddress;
-						//分配物理页框
+						//分配物理页框并写PTE
 						unsigned long newPageAddr=userPgMgr.AllocMemory();
 						unsigned int newPageIdx=newPageAddr/userPgMgr.PAGE_SIZE;
+						userPageTableArray->m_Entrys[virtualIdx].m_Accessed = 1;
 						userPageTableArray->m_Entrys[virtualIdx].m_PageBaseAddress=newPageIdx;
+						userPageTableArray->m_Entrys[virtualIdx].m_Present=1;
+						userPageTableArray->m_Entrys[virtualIdx].m_UserSupervisor = 1;
+						FlushPageDirectory((unsigned long)&Machine::Instance().GetPageDirectory()- Machine::KERNEL_SPACE_START_ADDRESS);
 						unsigned int pagesIdx=(newPageAddr-userPgMgr.USER_PAGE_POOL_START_ADDR)>>12;
 						page*sharedPage=&userPgMgr.pages[pagesIdx];
 						sharedPage->inode_id=inode_id;
@@ -390,19 +401,21 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 						/*判定是RO，也不挂radix tree。因为radix tree必须只挂文件中一开始的赋了初值的全局变量*/
 					}
 				}
-				else	//pte==NULL，从inode读入
+				else	//pte==NULL，先查缓存，若没有，从inode读入
 				{
 					radix_tree_node*leaf_node=radix_tree_node::FindLeafNode(&userPgMgr.sharedPageRoot,inode_id,f_offset);//尝试找对应页的叶子
 					leaf_node=radix_tree_node::EstablishPathToTrueLeaf(leaf_node,inode_id,f_offset);//建立到真正叶子的路径
 					if(leaf_node->slot[f_offset&((1UL<<8)-1)]==NULL)	//该页没有缓存，需要从inode取
 					{
-						//分配一页物理页
+						//分配一页物理页，先挂PTE进行读入
 						unsigned long phyAddr=userPgMgr.AllocMemory();
 						userPageTableArray->m_Entrys[virtualIdx].m_Accessed=1;
 						userPageTableArray->m_Entrys[virtualIdx].m_Present=1;
 						userPageTableArray->m_Entrys[virtualIdx].m_Used=1;
-						userPageTableArray->m_Entrys[virtualIdx].m_ReadWriter=0;
+						userPageTableArray->m_Entrys[virtualIdx].m_ReadWriter=1;	//写RO段，先改成RW
 						userPageTableArray->m_Entrys[virtualIdx].m_PageBaseAddress=phyAddr>>12;
+						userPageTableArray->m_Entrys[virtualIdx].m_UserSupervisor = 1;
+						FlushPageDirectory((unsigned long)&Machine::Instance().GetPageDirectory()- Machine::KERNEL_SPACE_START_ADDRESS);
 						//立即读入
 						u.u_IOParam.m_Base=(unsigned char*)(cr2&0xFFFFF000);
 						u.u_IOParam.m_Offset=readOffset;
@@ -428,6 +441,8 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 					userPageTableArray->m_Entrys[virtualIdx].m_Used=1;
 					userPageTableArray->m_Entrys[virtualIdx].m_ReadWriter=1;
 					userPageTableArray->m_Entrys[virtualIdx].m_PageBaseAddress=desAddr>>12;
+					userPageTableArray->m_Entrys[virtualIdx].m_UserSupervisor = 1;
+					FlushPageDirectory((unsigned long)&Machine::Instance().GetPageDirectory()- Machine::KERNEL_SPACE_START_ADDRESS);
 					//复制内容
 					unsigned int n=PageManager::PAGE_SIZE;
 					while(n--)
@@ -438,6 +453,7 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 			}
 			else if(vm_id==u.BSS_IDX||vm_id==u.STACK_IDX||vm_id==u.HEAP_IDX)
 			{
+				Diagnose::Write("Enter bss/stack/heap switch!\n");
 				unsigned int virtualIdx=(cr2-0x400000)>>12;	//在1#用户页表中的虚拟页框号
 				if(userPageTableArray->m_Entrys[virtualIdx].m_Used==1)	//非NULL
 				{
@@ -478,7 +494,11 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 						//分配物理页框
 						unsigned long newPageAddr=userPgMgr.AllocMemory();
 						unsigned int newPageIdx=newPageAddr/userPgMgr.PAGE_SIZE;
+						userPageTableArray->m_Entrys[virtualIdx].m_Accessed=1;
 						userPageTableArray->m_Entrys[virtualIdx].m_PageBaseAddress=newPageIdx;
+						userPageTableArray->m_Entrys[virtualIdx].m_Present=1;
+						userPageTableArray->m_Entrys[virtualIdx].m_UserSupervisor = 1;
+						FlushPageDirectory((unsigned long)&Machine::Instance().GetPageDirectory()- Machine::KERNEL_SPACE_START_ADDRESS);
 						unsigned int pagesIdx=(newPageAddr-userPgMgr.USER_PAGE_POOL_START_ADDR)>>12;
 						page*sharedPage=&userPgMgr.pages[pagesIdx];
 						//下面这些其实用不到，只是为了可以反向索引
@@ -495,11 +515,13 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 					//分配页框并建立映射
 					unsigned long pageAddr=userPgMgr.AllocMemory();
 					unsigned int pageIdx=pageAddr/PageManager::PAGE_SIZE;
+					userPageTableArray->m_Entrys[virtualIdx].m_Accessed=1;
 					userPageTableArray->m_Entrys[virtualIdx].m_PageBaseAddress=pageIdx;
 					userPageTableArray->m_Entrys[virtualIdx].m_Present=1;
 					userPageTableArray->m_Entrys[virtualIdx].m_ReadWriter=1;
 					userPageTableArray->m_Entrys[virtualIdx].m_Used=1;
-					userPageTableArray->m_Entrys[virtualIdx].m_Used=1;
+					userPageTableArray->m_Entrys[virtualIdx].m_UserSupervisor = 1;
+					FlushPageDirectory((unsigned long)&Machine::Instance().GetPageDirectory()-Machine::KERNEL_SPACE_START_ADDRESS);
 					unsigned long j=0;
 					//刷0
 					if(vm_id==u.BSS_IDX)
@@ -534,7 +556,10 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 		}
 	}
 	else
+	{
+		Diagnose::Write("Kernel PF: CR2=%x EIP=%x err=%x\n",cr2,context->eip,context->error_code);
 		Utility::Panic("Page Fault in Kernel Mode.");
+	}
 }
 
 //x87 FPU浮点错误(INT 16)

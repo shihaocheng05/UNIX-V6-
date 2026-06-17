@@ -3,6 +3,14 @@
 #include "Kernel.h"
 #include "Page.h"
 
+radix_tree_node::radix_tree_node()
+{
+    this->height = 0;
+    this->count = 0;
+    for(unsigned int i=0;i<RADIX_TREE_MAP_SIZE;i++)
+        slot[i]=NULL;
+}
+
 radix_tree_node::radix_tree_node(unsigned int height,unsigned int count)
 {
     this->height=height;
@@ -15,6 +23,7 @@ radix_tree_node::radix_tree_node(unsigned int height,unsigned int count)
 
 void radix_tree_node::FreeRangePage(radix_tree_node*root)   //只在inode引用数为0时调用一次，因此，对于共享页的引用计数不应该增加（应始终为1）
 {
+    if(root==NULL) return;
     KernelAllocator&kAllocator=Kernel::Instance().GetKernelAllocator();
     if(root->height==0) //叶子节点
     {
@@ -25,7 +34,7 @@ void radix_tree_node::FreeRangePage(radix_tree_node*root)   //只在inode引用数为0
             {
                 userPgMgr.FreeMemory(((page*)root->slot[i])->pageNo<<12);
                 root->slot[i]=NULL;
-                root->count--;
+                if(root->count>0) root->count--;
             }
         }
     }
@@ -37,7 +46,7 @@ void radix_tree_node::FreeRangePage(radix_tree_node*root)   //只在inode引用数为0
             {
                 FreeRangePage((radix_tree_node*)root->slot[i]);
                 root->slot[i]=NULL;
-                root->count--;
+                if(root->count>0) root->count--;
             }
         }
     }

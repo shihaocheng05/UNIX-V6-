@@ -4,6 +4,7 @@
 #include "PageTable.h"
 #include "PageDirectory.h"
 #include "VMArea.h"
+#include "Page.h"
 
 class MemoryDescriptor
 {
@@ -75,7 +76,7 @@ public:
 	unsigned long	m_DataSize;			/* 数据段长度 */
 
 	unsigned long	m_StackSize;		/* 栈段长度 */
-	unsigned int    current=0;
+	unsigned int    current;
 };
 
 #endif

@@ -56,7 +56,7 @@ unsigned int SwapperManager::AllocSwap()	//´Ó¿ÕÏÐ¿é¶ÓÁÐÖÐÈ¡¶ÓÊ×£¬·µ»Ø´ÅÅÌÉÈÇøºÅ
 	return 0;
 }
 
-unsigned int SwapperManager::FreeSwap(unsigned int startBlock)	//¹Ò»Ø¿ÕÏÐ¿é¶ÓÁÐ¶ÓÎ²£¬Í¨³£²»¼ì²éÆä·µ»ØÖµ
+unsigned int SwapperManager::FreeSwap(unsigned int startBlock)	//´«Èë´ÅÅÌÉÈÇøºÅ£¬¹Ò»Ø¿ÕÏÐ¿é¶ÓÁÐ¶ÓÎ²£¬Í¨³£²»¼ì²éÆä·µ»ØÖµ
 {
 	unsigned int pageNo=(startBlock-SWAPPER_ZONE_START_BLOCK)/8;
 	if(freeSwapList.tail!=NULL)
@@ -67,7 +67,7 @@ unsigned int SwapperManager::FreeSwap(unsigned int startBlock)	//¹Ò»Ø¿ÕÏÐ¿é¶ÓÁÐ¶
 	else
 	{
 		freeSwapList.head=freeSwapList.tail=&SwapperPage[pageNo];
-		SwapperPage[pageNo].next=NULL;
 	}
+	freeSwapList.tail->next=NULL;
 	return 0;
 }

@@ -51,7 +51,7 @@ void ProcessManager::SetupProcessZero()
 	u.u_MemoryDescriptor.m_DataSize = 0;
 	u.u_MemoryDescriptor.m_StackSize = 0;
 	u.u_MemoryDescriptor.m_UserPageTableArray = NULL;
-//	u.u_MemoryDescriptor.Initialize();
+	u.u_MemoryDescriptor.current=0;
 }
 
 unsigned int ProcessManager::NextUniquePid()
@@ -231,6 +231,7 @@ void ProcessManager::Wait()
 	SwapperManager& swapperMgr = Kernel::Instance().GetSwapperManager();
 	BufferManager& bufMgr = Kernel::Instance().GetBufferManager();
 	KernelPageManager& kernelPgMgr=Kernel::Instance().GetKernelPageManager();
+	UserPageManager&userPgMgr=Kernel::Instance().GetUserPageManager();
 	
 	Diagnose::Write("Process %d finding dead son. They are ",u.u_procp->p_pid);
 	while(true)
@@ -256,10 +257,17 @@ void ProcessManager::Wait()
 					process[i].p_pgTable=NULL;
 
 					/* 读入swapper中子进程u结构副本 */
-					Buf* pBuf = bufMgr.Bread(DeviceManager::ROOTDEV, process[i].p_addr);
+					//先在页表区内存中分配一个临时页框用于读入PPDA
+					unsigned long userAddr=kernelPgMgr.AllocMemory(kernelPgMgr.KERNEL_PAGE_POOL_START_ADDR,kernelPgMgr.KERNEL_PAGE_POOL_END_ADDR)+Machine::KERNEL_SPACE_START_ADDRESS;
+					unsigned blkno=process[i].p_addr;
+					User* pUser = (User *)userAddr;
+					for(unsigned int i=0;i<PageManager::PAGE_SIZE;i+=BufferManager::BUFFER_SIZE,blkno++)
+					{
+						Buf* pBuf = bufMgr.Bread(DeviceManager::ROOTDEV, blkno);
+						Utility::DWordCopy((int *)pBuf->b_addr,(int *)((char*)pUser+i),BufferManager::BUFFER_SIZE / sizeof(int));
+						bufMgr.Brelse(pBuf);
+					}
 					swapperMgr.FreeSwap(process[i].p_addr);
-					User* pUser = (User *)pBuf->b_addr;
-
 					/* 把子进程的时间加到父进程上 */
 					u.u_cstime += pUser->u_cstime +	pUser->u_stime;
 					u.u_cutime += pUser->u_cutime + pUser->u_utime;
@@ -267,9 +275,7 @@ void ProcessManager::Wait()
 					int* pInt = (int *)u.u_arg[0];
 					/* 获取子进程exit(int status)的返回值 */
 					*pInt = pUser->u_arg[0];
-
-					/* 如果此处没有Brelse()系统会发生什么-_- */
-					bufMgr.Brelse(pBuf);
+					kernelPgMgr.FreeMemory(userAddr-Machine::KERNEL_SPACE_START_ADDRESS);
 					Diagnose::Write("end wait\n");
 					return;
 				}
@@ -398,6 +404,8 @@ void ProcessManager::Exec()
 	if(totalLength+PageManager::PAGE_SIZE>MemoryDescriptor::USER_SPACE_SIZE-parser.TextAddress||!legalFile)
 	{
 		fileMgr.m_InodeTable->IPut(pInode);
+		KernelPageManager& kpm = Kernel::Instance().GetKernelPageManager();
+		kpm.FreeMemory((unsigned long)parser.sectionHeaders - Machine::KERNEL_SPACE_START_ADDRESS);
 		u.u_error = User::ENOMEM;
 		return;
 	}
@@ -513,7 +521,7 @@ void ProcessManager::Exec()
 		u.vm_list[i].v_start=(parser.sectionHeaders[i].VirtualAddress+parser.ntHeader.OptionalHeader.ImageBase+PageManager::PAGE_SIZE-1)>>12<<12;
 		u.vm_list[i].v_length=(parser.sectionHeaders[i].Misc.VirtualSize+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE*PageManager::PAGE_SIZE;		//虚空间内，要求按页对齐
 		u.vm_list[i].f_offset=parser.sectionHeaders[i].PointerToRawData;	//文件中偏移量
-		u.vm_list[i].f_length=parser.sectionHeaders[i].Misc.VirtualSize;	//文件中实际长度
+		u.vm_list[i].f_length=parser.sectionHeaders[i].Misc.VirtualSize;	//文件中实际长度，实际上暂时没有用到
 		u.vm_list[i].v_Present=1;
 		u.vm_list[i].v_UserSupervisor=1;
 		u.vm_list[i].next=&u.vm_list[i+1];
@@ -593,7 +601,6 @@ void ProcessManager::Exec()
 		 * 导致和之前进程共享同一Text结构，即同一正文段，而实际上本该是两个独立的程序。
 		 */
 		pInode->i_count++;
-
 		pText->x_count = 1;
 		pText->x_iptr = pInode;
 		pText->x_size = u.u_MemoryDescriptor.m_TextSize;
@@ -638,6 +645,9 @@ void ProcessManager::Exec()
 	{
 		u.u_ar0[i] = 0;     /* 下标写成  User::EAX + i 可读性要强一些，但是运算速度慢了。就小抠，追求速度吧 */
 	}
+
+	KernelPageManager& kpm = Kernel::Instance().GetKernelPageManager();
+	kpm.FreeMemory((unsigned long)parser.sectionHeaders - Machine::KERNEL_SPACE_START_ADDRESS);
 
 	/* 将exe程序的入口地址放入核心栈现场保护区中的EAX作为系统调用返回值，这个是runtime要用  */
 	u.u_ar0[User::EAX] = parser.EntryPointAddress;

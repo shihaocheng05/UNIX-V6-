@@ -176,7 +176,7 @@ extern "C" void next()
 
 	//init Page
 	PageAllocator&m_pAllocator=PageAllocator::GetInstance();
-	//暂时直接用硬编码，不好，后面最好要改
+	//暂时直接hardcode，不好，后面最好要改
 	m_pAllocator.Page[0x200]=1;	//核心页表
 	m_pAllocator.Page[0x201]=1;	//0#用户页表
 	m_pAllocator.Page[0x202]=1;	//0#页目录

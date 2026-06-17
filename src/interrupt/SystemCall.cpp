@@ -802,15 +802,10 @@ int SystemCall::Sys_Getproc() {
         return 0;
     }
     // 4. 提取内核态数据（进程相关信息）
-    unsigned long kernel_x_caddr = u.u_procp->p_textp->x_caddr;
     unsigned int  kernel_x_size  = u.u_procp->p_textp->x_size;
     unsigned long kernel_p_addr  = u.u_procp->p_addr;
     unsigned int  kernel_p_size  = u.u_procp->p_size;
     // 5. 用 copy_to_user 安全写入用户态内存（逐个参数拷贝，失败立即返回错误）
-    if (copy_to_user(user_x_caddr, &kernel_x_caddr, sizeof(unsigned long)) != 0) {
-        u.u_error = User::EFAULT;  // 拷贝失败，设置错误码
-        return 0;
-    }
     if (copy_to_user(user_x_size, &kernel_x_size, sizeof(unsigned int)) != 0) {
         u.u_error = User::EFAULT;
         return 0;

@@ -5,6 +5,8 @@
 #include "Allocator.h"
 #include "Page.h"
 
+#define NULL 0
+
 class SwapperManager
 {
 public:
@@ -51,7 +53,7 @@ private:
 	/* Members */
 public:
 	MapNode map[SwapperManager::SWAPPER_MAP_ARRAY_SIZE];
-	/*需要维护SwapPage数组*/
+	/*需要维护SwapPage数组和空闲链表，没有共享页缓存radix tree（还是要读磁盘，没有意义）*/
 	SwapPage SwapperPage[SWAPPER_PAGE_NUM];
 	FreeSwapList freeSwapList;
 private:

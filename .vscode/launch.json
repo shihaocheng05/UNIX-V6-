@@ -8,11 +8,11 @@
             "type": "cppdbg",
             "request": "launch",
             "miDebuggerServerAddress": "localhost:1234",
-            "program": "D:/UNIX V6++test/oos/targets/objs/kernel.exe",
+            "program": "D:/UNIX V6++V1/oos/targets/objs/kernel.exe",
             "miDebuggerPath": "gdb",
             "setupCommands": [ 
             { 
-                "text": "set substitute-path 'D:/UNIX V6++test' C:/Users/Public/Unix_v6pp",
+                "text": "set substitute-path 'D:/UNIX V6++V1' C:/Users/Public/Unix_v6pp",
                 //注意第二个参数替换为你的unix v6++文件夹绝对路径 
                 "ignoreFailures": false 
             } 

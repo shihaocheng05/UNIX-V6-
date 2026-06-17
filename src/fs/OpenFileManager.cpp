@@ -223,7 +223,7 @@ void InodeTable::IPut(Inode *pNode)
 			radix_tree_node*inode_layer_node=(radix_tree_node*)userPgMgr.sharedPageRoot.slot[pNode->i_index];
 			radix_tree_node::FreeRangePage(inode_layer_node);
 			userPgMgr.sharedPageRoot.slot[pNode->i_index]=NULL;
-			userPgMgr.sharedPageRoot.count--;
+			if(userPgMgr.sharedPageRoot.count>0) userPgMgr.sharedPageRoot.count--;
 			/* 释放该文件占据的数据盘块 */
 			pNode->ITrunc();
 			pNode->i_mode = 0;

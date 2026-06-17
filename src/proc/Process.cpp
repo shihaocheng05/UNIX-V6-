@@ -184,16 +184,13 @@ void Process::Exit()
 	unsigned int dataVirtualIdx=u.u_MemoryDescriptor.m_DataStartAddress%PageTable::SIZE_PER_PAGETABLE_MAP;
 	dataVirtualIdx/=userPageMgr.PAGE_SIZE;
 	u.u_MemoryDescriptor.FreePhyPage(dataVirtualIdx,u.u_MemoryDescriptor.m_DataSize,0);
-	//rdata段
-	unsigned int rdataStartIdx=(u.vm_list[u.RDATA_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
+	//BSS和堆段
 	unsigned int bssStartIdx=(u.vm_list[u.BSS_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
 	unsigned int heapStartIdx=(u.vm_list[u.HEAP_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
-	u.u_MemoryDescriptor.FreePhyPage(rdataStartIdx,u.vm_list[u.RDATA_IDX].v_length,0);
 	u.u_MemoryDescriptor.FreePhyPage(bssStartIdx,u.vm_list[u.BSS_IDX].v_length,0);
 	u.u_MemoryDescriptor.FreePhyPage(heapStartIdx,u.vm_list[u.HEAP_IDX].v_length,0);
 	//清除栈段
 	u.u_MemoryDescriptor.FreePhyPage(0,u.u_MemoryDescriptor.m_StackSize,1);
-
 	Process::ProcessState p_stat=u.u_procp->p_stat;
 	u.u_procp->p_stat=Process::SSTOP;
 	/* 释放该进程对共享正文段的引用 */
@@ -203,7 +200,9 @@ void Process::Exit()
 		{
 			//通过内存中的页表释放所有已分配的物理页框(包括盘交换区上的)
 			unsigned int textStartIdx=u.vm_list[u.TEXT_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP/PageManager::PAGE_SIZE;
-			u.u_MemoryDescriptor.FreePhyPage(textStartIdx,u.u_procp->p_textp->x_size,0);
+			unsigned int rdataStartIdx=(u.vm_list[u.RDATA_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
+			u.u_MemoryDescriptor.FreePhyPage(textStartIdx,u.u_procp->p_textp->x_size,0);	//还是没有去掉。未来，进程共享页可以换出到盘交换区上时，可以直接过渡
+			u.u_MemoryDescriptor.FreePhyPage(rdataStartIdx,u.vm_list[u.RDATA_IDX].v_length,0);
 			Kernel::Instance().GetFileManager().m_InodeTable->IPut(u.u_procp->p_textp->x_iptr);
 			u.u_procp->p_textp->x_iptr = NULL;
 		}
