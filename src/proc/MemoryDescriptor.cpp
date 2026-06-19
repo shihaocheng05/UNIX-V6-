@@ -5,6 +5,7 @@
 #include "PageDirectory.h"
 #include "Video.h"
 #include "SwapperManager.h"
+#include "Assembly.h"
 
 PageDirectory* MemoryDescriptor::Initialize()
 {
@@ -199,29 +200,42 @@ void MemoryDescriptor::EstablishUserPageTable(vm_area vm_list[],int shared,PageD
 		for(unsigned int i=0;i<textPageNum;i++)
 		{
 			userPageTableArray->m_Entrys[textVirtualIdx+i].m_Used=0;
+			userPageTableArray->m_Entrys[textVirtualIdx+i].m_Present=0;
+			userPageTableArray->m_Entrys[textVirtualIdx+i].m_PageBaseAddress=0;
 		}
 	}
 	for(unsigned int i=0;i<dataPageNum;i++)
 	{
 		userPageTableArray->m_Entrys[dataVirtualIdx+i].m_Used=0;
+		userPageTableArray->m_Entrys[dataVirtualIdx+i].m_Present=0;
+		userPageTableArray->m_Entrys[dataVirtualIdx+i].m_PageBaseAddress=0;
 	}
 	for(unsigned int i=0;i<rdataPageNum;i++)
 	{
 		userPageTableArray->m_Entrys[rdataVirtualIdx+i].m_Used=0;
+		userPageTableArray->m_Entrys[rdataVirtualIdx+i].m_Present=0;
+		userPageTableArray->m_Entrys[rdataVirtualIdx+i].m_PageBaseAddress=0;
 	}
 	for(unsigned int i=0;i<bssPageNum;i++)
 	{
 		userPageTableArray->m_Entrys[bssVirtualIdx+i].m_Used=0;
+		userPageTableArray->m_Entrys[bssVirtualIdx+i].m_Present=0;
+		userPageTableArray->m_Entrys[bssVirtualIdx+i].m_PageBaseAddress=0;
 	}
 	for(unsigned int i=0;i<heapPageNum;i++)
 	{
 		userPageTableArray->m_Entrys[heapVirtualIdx+i].m_Used=0;
+		userPageTableArray->m_Entrys[heapVirtualIdx+i].m_Present=0;
+		userPageTableArray->m_Entrys[heapVirtualIdx+i].m_PageBaseAddress=0;
 	}
 	//stack是特例，最后一页fakestack已经映射完毕
 	for(unsigned int i=0;i<stackPageNum-1;i++)
 	{
 		userPageTableArray->m_Entrys[stackVirtualIdx+i].m_Used=0;
+		userPageTableArray->m_Entrys[stackVirtualIdx+i].m_Present=0;
+		userPageTableArray->m_Entrys[stackVirtualIdx+i].m_PageBaseAddress=0;
 	}
+	FlushPageDirectory((unsigned long)&Machine::Instance().GetPageDirectory()-Machine::KERNEL_SPACE_START_ADDRESS);
 }
 
 //改写为通过父进程的1#用户页表m_UserPageTableArray写子进程的1#用户页表
@@ -259,11 +273,12 @@ void MemoryDescriptor::DisplayPageTable()
 
 	Diagnose::Write("Process PT:");
 	for ( j = 0; j < PageTable::ENTRY_CNT_PER_PAGETABLE; j++)
-			if ( 1 == this->m_UserPageTableArray->m_Entrys[j].m_Present )
+			if ( 1 == this->m_UserPageTableArray->m_Entrys[j].m_Present&&1==this->m_UserPageTableArray->m_Entrys[j].m_Used )
 				Diagnose::Write("<%d,%x>  ",j,this->m_UserPageTableArray->m_Entrys[j].m_PageBaseAddress);
 	Diagnose::Write("\n");
 
 	Diagnose::Write("<PPDA,%x>  ",Machine::Instance().GetKernelPageTable().m_Entrys[1023].m_PageBaseAddress);
+	Diagnose::Write("\n");
 }
 
 void MemoryDescriptor::ClearUserPageTable()
@@ -305,6 +320,8 @@ void MemoryDescriptor::FreePhyPage(unsigned int sectionStartIdx,unsigned long se
 					swpMgr.FreeSwap(userPageTableArray->m_Entrys[sectionStartIdx+i].m_PageBaseAddress);
 				}
 				userPageTableArray->m_Entrys[sectionStartIdx+i].m_Used=0;
+				userPageTableArray->m_Entrys[sectionStartIdx+i].m_Present=0;
+				userPageTableArray->m_Entrys[sectionStartIdx+i].m_PageBaseAddress=0;
 			}
 		}
 	}
@@ -324,6 +341,8 @@ void MemoryDescriptor::FreePhyPage(unsigned int sectionStartIdx,unsigned long se
 					swpMgr.FreeSwap(userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_PageBaseAddress);
 				}
 				userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_Used=0;	//表示NULL
+				userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_Present=0;
+				userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_PageBaseAddress=0;
 			}
 		}
 	}

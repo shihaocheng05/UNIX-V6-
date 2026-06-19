@@ -646,6 +646,39 @@ void ProcessManager::Exec()
 		u.u_ar0[i] = 0;     /* 下标写成  User::EAX + i 可读性要强一些，但是运算速度慢了。就小抠，追求速度吧 */
 	}
 
+	 /* 预分配 data 段第一页，防止内核 syscall 中 pwd 读 user buffer 时缺页 */
+    unsigned int dataVirtualIdx = (u.vm_list[u.DATA_IDX].v_start
+        % PageTable::SIZE_PER_PAGETABLE_MAP) / PageManager::PAGE_SIZE;
+    unsigned long dataPhy = userPgMgr.AllocMemory();
+    if (dataPhy) {
+        PageTable* pt = u.u_MemoryDescriptor.m_UserPageTableArray;
+        pt->m_Entrys[dataVirtualIdx].m_PageBaseAddress = dataPhy >> 12;
+        pt->m_Entrys[dataVirtualIdx].m_Present = 1;
+        pt->m_Entrys[dataVirtualIdx].m_ReadWriter = 1;
+        pt->m_Entrys[dataVirtualIdx].m_UserSupervisor = 1;
+        pt->m_Entrys[dataVirtualIdx].m_Used = 1;
+            u.u_IOParam.m_Base = (unsigned char *)(u.vm_list[u.DATA_IDX].v_start);
+            u.u_IOParam.m_Offset = u.vm_list[u.DATA_IDX].f_offset;
+            u.u_IOParam.m_Count = PageManager::PAGE_SIZE;
+            pInode->ReadI();
+	}
+    
+    // BSS 首页
+    unsigned int idx = (u.vm_list[u.BSS_IDX].v_start % 0x400000) / 0x1000;
+    unsigned long p2 = userPgMgr.AllocMemory();
+    if (p2) {
+            PageTable* pt = u.u_MemoryDescriptor.m_UserPageTableArray;
+        pt->m_Entrys[idx].m_PageBaseAddress = p2 >> 12;
+        pt->m_Entrys[idx].m_Present = 1;
+        pt->m_Entrys[idx].m_ReadWriter = 1;
+        pt->m_Entrys[idx].m_UserSupervisor = 1;
+        pt->m_Entrys[idx].m_Used = 1;
+            unsigned char *bssBase = (unsigned char *)(u.vm_list[u.BSS_IDX].v_start);
+            for (unsigned int j = 0; j < PageManager::PAGE_SIZE; j++) {
+                bssBase[j] = 0;
+            }
+    }
+
 	KernelPageManager& kpm = Kernel::Instance().GetKernelPageManager();
 	kpm.FreeMemory((unsigned long)parser.sectionHeaders - Machine::KERNEL_SPACE_START_ADDRESS);
 

@@ -270,10 +270,11 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 
 	if( (context->xcs & USER_MODE) == USER_MODE)
 	{
+
 		unsigned int vm_id=VM_AREA_MAX;	//随便设置一个越界的索引
 		for(unsigned int i=0;i<=u.STACK_IDX;i++)
 		{
-			if(cr2>=u.vm_list[i].v_start&&cr2<=u.vm_list[i].v_start+u.vm_list[i].f_length)//不应该是加虚空间长度，应该加文件中的实际长度
+			if(cr2>=u.vm_list[i].v_start&&cr2<=u.vm_list[i].v_start+u.vm_list[i].v_length)//不应该是加虚空间长度，应该加文件中的实际长度
 			{
 				vm_id=i;
 			}
@@ -282,7 +283,7 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 		{
 			if(vm_id==u.TEXT_IDX||vm_id==u.RDATA_IDX)	//代码段或RDATA
 			{
-				Diagnose::Write("Enter text switch!\n");
+//				Diagnose::Write("Enter text switch!\n");
 				unsigned int virtualIdx=(cr2-0x400000)>>12;	//在1#用户页表中的虚拟页框号
 				unsigned int f_offset=(cr2-u.vm_list[vm_id].v_start)/PageManager::PAGE_SIZE*PageManager::PAGE_SIZE;		//相对于段sectionHeader->PointerToRawData的偏移量，向下取整（因为一页一页读），能够让一页的内容共享同一缓存
 				f_offset+=u.vm_list[vm_id].f_offset;	//在文件中的真实偏移量
@@ -338,7 +339,7 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 			}
 			else if(vm_id==u.DATA_IDX)
 			{
-				Diagnose::Write("Enter data switch!\n");
+//				Diagnose::Write("Enter data switch!\n");
 				unsigned int virtualIdx=(cr2-0x400000)>>12;	//在1#用户页表中的虚拟页框号
 				unsigned int f_offset=(cr2-u.vm_list[vm_id].v_start)/PageManager::PAGE_SIZE*PageManager::PAGE_SIZE;		//相对于段sectionHeader->PointerToRawData的偏移量，向下取整（因为一页一页读），能够让一页的内容共享同一缓存
 				f_offset+=u.vm_list[vm_id].f_offset;	//在文件中的真实偏移量
@@ -346,7 +347,7 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 				f_offset&=(((1UL<<24)-1)<<12);	//取13-36位，之后查radix tree
 				f_offset>>=12;	//偏移页框量
 				unsigned inode_id=current->p_textp->x_iptr->i_index;
-				if(userPageTableArray->m_Entrys[virtualIdx].m_Used==1)
+				if(userPageTableArray->m_Entrys[virtualIdx].m_Used==1)	//不是NULL
 				{
 					//判断是否是写操作引发异常
 					unsigned int error_code=context->error_code;
@@ -453,7 +454,7 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 			}
 			else if(vm_id==u.BSS_IDX||vm_id==u.STACK_IDX||vm_id==u.HEAP_IDX)
 			{
-				Diagnose::Write("Enter bss/stack/heap switch!\n");
+//				Diagnose::Write("Enter bss/stack/heap switch!\n");
 				unsigned int virtualIdx=(cr2-0x400000)>>12;	//在1#用户页表中的虚拟页框号
 				if(userPageTableArray->m_Entrys[virtualIdx].m_Used==1)	//非NULL
 				{
@@ -528,7 +529,7 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 					{
 						for(;j<PageManager::PAGE_SIZE;j++)
 						{
-							unsigned char*b=(unsigned char*)((virtualIdx<<12)+j);
+							unsigned char*b=(unsigned char*)((cr2 & 0xFFFFF000)+j);
 							*b=0;
 						}
 					}
