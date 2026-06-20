@@ -240,7 +240,7 @@ void ProcessManager::Wait()
 		{
 			if ( u.u_procp->p_pid == process[i].p_ppid )
 			{
-				Diagnose::Write("Process %d (Status:%d)  ",process[i].p_pid,process[i].p_stat);
+				Diagnose::Write("Process %d (Status:%d)  \n",process[i].p_pid,process[i].p_stat);
 				hasChild = true;
 				/* 睡眠等待直至子进程结束 */
 				if( Process::SZOMB == process[i].p_stat )
@@ -276,7 +276,6 @@ void ProcessManager::Wait()
 					/* 获取子进程exit(int status)的返回值 */
 					*pInt = pUser->u_arg[0];
 					kernelPgMgr.FreeMemory(userAddr-Machine::KERNEL_SPACE_START_ADDRESS);
-					Diagnose::Write("end wait\n");
 					return;
 				}
 			}
@@ -284,9 +283,7 @@ void ProcessManager::Wait()
 		if (true == hasChild)
 		{
 			/* 睡眠等待直至子进程结束 */
-			Diagnose::Write("wait until child process Exit! ");
 			u.u_procp->Sleep((unsigned long)u.u_procp, ProcessManager::PWAIT);
-			Diagnose::Write("end sleep\n");
 			continue;	/* 回到外层while(true)循环 */
 		}
 		else
@@ -647,37 +644,43 @@ void ProcessManager::Exec()
 	}
 
 	 /* 预分配 data 段第一页，防止内核 syscall 中 pwd 读 user buffer 时缺页 */
-    unsigned int dataVirtualIdx = (u.vm_list[u.DATA_IDX].v_start
-        % PageTable::SIZE_PER_PAGETABLE_MAP) / PageManager::PAGE_SIZE;
-    unsigned long dataPhy = userPgMgr.AllocMemory();
-    if (dataPhy) {
-        PageTable* pt = u.u_MemoryDescriptor.m_UserPageTableArray;
-        pt->m_Entrys[dataVirtualIdx].m_PageBaseAddress = dataPhy >> 12;
-        pt->m_Entrys[dataVirtualIdx].m_Present = 1;
-        pt->m_Entrys[dataVirtualIdx].m_ReadWriter = 1;
-        pt->m_Entrys[dataVirtualIdx].m_UserSupervisor = 1;
-        pt->m_Entrys[dataVirtualIdx].m_Used = 1;
-            u.u_IOParam.m_Base = (unsigned char *)(u.vm_list[u.DATA_IDX].v_start);
-            u.u_IOParam.m_Offset = u.vm_list[u.DATA_IDX].f_offset;
-            u.u_IOParam.m_Count = PageManager::PAGE_SIZE;
-            pInode->ReadI();
+	if (u.vm_list[u.DATA_IDX].v_length > 0)
+	{
+		unsigned int dataVirtualIdx = (u.vm_list[u.DATA_IDX].v_start
+    	    % PageTable::SIZE_PER_PAGETABLE_MAP) / PageManager::PAGE_SIZE;
+    	unsigned long dataPhy = userPgMgr.AllocMemory();
+    	if (dataPhy) {
+    	    PageTable* pt = u.u_MemoryDescriptor.m_UserPageTableArray;
+    	    pt->m_Entrys[dataVirtualIdx].m_PageBaseAddress = dataPhy >> 12;
+    	    pt->m_Entrys[dataVirtualIdx].m_Present = 1;
+    	    pt->m_Entrys[dataVirtualIdx].m_ReadWriter = 1;
+    	    pt->m_Entrys[dataVirtualIdx].m_UserSupervisor = 1;
+    	    pt->m_Entrys[dataVirtualIdx].m_Used = 1;
+    	        u.u_IOParam.m_Base = (unsigned char *)(u.vm_list[u.DATA_IDX].v_start);
+    	        u.u_IOParam.m_Offset = u.vm_list[u.DATA_IDX].f_offset;
+    	        u.u_IOParam.m_Count = PageManager::PAGE_SIZE;
+    	        pInode->ReadI();
+		}
 	}
     
     // BSS 首页
-    unsigned int idx = (u.vm_list[u.BSS_IDX].v_start % 0x400000) / 0x1000;
-    unsigned long p2 = userPgMgr.AllocMemory();
-    if (p2) {
-            PageTable* pt = u.u_MemoryDescriptor.m_UserPageTableArray;
-        pt->m_Entrys[idx].m_PageBaseAddress = p2 >> 12;
-        pt->m_Entrys[idx].m_Present = 1;
-        pt->m_Entrys[idx].m_ReadWriter = 1;
-        pt->m_Entrys[idx].m_UserSupervisor = 1;
-        pt->m_Entrys[idx].m_Used = 1;
-            unsigned char *bssBase = (unsigned char *)(u.vm_list[u.BSS_IDX].v_start);
-            for (unsigned int j = 0; j < PageManager::PAGE_SIZE; j++) {
-                bssBase[j] = 0;
-            }
-    }
+	if(u.vm_list[u.BSS_IDX].v_length > 0)
+	{
+		unsigned int idx = (u.vm_list[u.BSS_IDX].v_start % 0x400000) / 0x1000;
+    	unsigned long p2 = userPgMgr.AllocMemory();
+    	if (p2) {
+    	        PageTable* pt = u.u_MemoryDescriptor.m_UserPageTableArray;
+    	    pt->m_Entrys[idx].m_PageBaseAddress = p2 >> 12;
+    	    pt->m_Entrys[idx].m_Present = 1;
+    	    pt->m_Entrys[idx].m_ReadWriter = 1;
+    	    pt->m_Entrys[idx].m_UserSupervisor = 1;
+    	    pt->m_Entrys[idx].m_Used = 1;
+    	        unsigned char *bssBase = (unsigned char *)(u.vm_list[u.BSS_IDX].v_start);
+    	        for (unsigned int j = 0; j < PageManager::PAGE_SIZE; j++) {
+    	            bssBase[j] = 0;
+    	        }
+    	}
+	}
 
 	KernelPageManager& kpm = Kernel::Instance().GetKernelPageManager();
 	kpm.FreeMemory((unsigned long)parser.sectionHeaders - Machine::KERNEL_SPACE_START_ADDRESS);

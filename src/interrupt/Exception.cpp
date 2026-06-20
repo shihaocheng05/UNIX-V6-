@@ -283,7 +283,7 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 		{
 			if(vm_id==u.TEXT_IDX||vm_id==u.RDATA_IDX)	//代码段或RDATA
 			{
-//				Diagnose::Write("Enter text switch!\n");
+				Diagnose::Write("Enter text switch!\n");
 				unsigned int virtualIdx=(cr2-0x400000)>>12;	//在1#用户页表中的虚拟页框号
 				unsigned int f_offset=(cr2-u.vm_list[vm_id].v_start)/PageManager::PAGE_SIZE*PageManager::PAGE_SIZE;		//相对于段sectionHeader->PointerToRawData的偏移量，向下取整（因为一页一页读），能够让一页的内容共享同一缓存
 				f_offset+=u.vm_list[vm_id].f_offset;	//在文件中的真实偏移量
@@ -339,7 +339,7 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 			}
 			else if(vm_id==u.DATA_IDX)
 			{
-//				Diagnose::Write("Enter data switch!\n");
+				Diagnose::Write("Enter data switch!\n");
 				unsigned int virtualIdx=(cr2-0x400000)>>12;	//在1#用户页表中的虚拟页框号
 				unsigned int f_offset=(cr2-u.vm_list[vm_id].v_start)/PageManager::PAGE_SIZE*PageManager::PAGE_SIZE;		//相对于段sectionHeader->PointerToRawData的偏移量，向下取整（因为一页一页读），能够让一页的内容共享同一缓存
 				f_offset+=u.vm_list[vm_id].f_offset;	//在文件中的真实偏移量
@@ -454,7 +454,7 @@ void Exception::PageFault(struct pt_regs* regs, struct pte_context* context)
 			}
 			else if(vm_id==u.BSS_IDX||vm_id==u.STACK_IDX||vm_id==u.HEAP_IDX)
 			{
-//				Diagnose::Write("Enter bss/stack/heap switch!\n");
+				Diagnose::Write("Enter bss/stack/heap switch!\n");
 				unsigned int virtualIdx=(cr2-0x400000)>>12;	//在1#用户页表中的虚拟页框号
 				if(userPageTableArray->m_Entrys[virtualIdx].m_Used==1)	//非NULL
 				{

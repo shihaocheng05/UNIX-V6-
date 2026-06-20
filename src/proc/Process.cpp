@@ -172,8 +172,6 @@ void Process::Exit()
 		Buf* pBuf = bufMgr.GetBlk(DeviceManager::ROOTDEV, blkno);
 		Utility::DWordCopy((int *)((char*)&u+i), (int *)pBuf->b_addr, BufferManager::BUFFER_SIZE / sizeof(int));
 		bufMgr.Bwrite(pBuf);
-		//释放缓存块
-		bufMgr.Brelse(pBuf);
 	}
 	blkno-=8;	//后面要用到赋给current->p_addr
 
