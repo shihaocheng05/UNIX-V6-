@@ -538,7 +538,7 @@ void ProcessManager::Exec()
 	u.vm_list[u.HEAP_IDX].v_start=(u.vm_list[parser.BSS_SECTION_IDX].v_start+u.vm_list[parser.BSS_SECTION_IDX].v_length+PageManager::PAGE_SIZE-1)>>12<<12;//堆默认在BSS后面跟着
 	u.vm_list[u.HEAP_IDX].v_length=(parser.HeapSize+PageManager::PAGE_SIZE-1)>>12<<12;
 	u.vm_list[u.HEAP_IDX].f_offset=0;
-	u.vm_list[u.HEAP_IDX].f_length=0;
+	u.vm_list[u.HEAP_IDX].f_length=parser.HeapSize;
 	u.vm_list[u.HEAP_IDX].v_Present=1;
 	u.vm_list[u.HEAP_IDX].v_ReadWriter=1;
 	u.vm_list[u.HEAP_IDX].v_UserSupervisor=1;
@@ -548,7 +548,7 @@ void ProcessManager::Exec()
 	u.vm_list[u.STACK_IDX].v_start=u.u_MemoryDescriptor.USER_SPACE_SIZE-u.vm_list[u.STACK_IDX].v_length;
 	u.u_MemoryDescriptor.m_StackSize=u.vm_list[u.STACK_IDX].v_length;
 	u.vm_list[u.STACK_IDX].f_length=0;
-	u.vm_list[u.STACK_IDX].f_offset=0;
+	u.vm_list[u.STACK_IDX].f_offset=parser.StackSize;
 	u.vm_list[u.STACK_IDX].v_Present=1;
 	u.vm_list[u.STACK_IDX].v_ReadWriter=1;
 	u.vm_list[u.STACK_IDX].v_UserSupervisor=1;
