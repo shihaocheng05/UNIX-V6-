@@ -26,19 +26,36 @@ bool TestSwapperManager()
 	SwapperManager& swapMgr = Kernel::Instance().GetSwapperManager();
 	int ans;
 	
-	ans = swapMgr.AllocSwap(4000); /* bytes, need 4096 / 512 = 8 sectors  */
+//	ans = swapMgr.AllocSwap(4000); /* bytes, need 4096 / 512 = 8 sectors  */
+//	
+//	swapMgr.AllocSwap(SwapperManager::BLOCK_SIZE * 2);
+//
+//	swapMgr.FreeSwap(2000, ans + 4);
+//
+//	ans = swapMgr.AllocSwap(SwapperManager::BLOCK_SIZE * 10);
+//
+//	swapMgr.FreeSwap(SwapperManager::BLOCK_SIZE * 10, ans);
+//
+//	//PrintAllMapNode(swapMgr);
+//
+//	swapMgr.AllocSwap(513 /* byte */ );
+//
+//	PrintAllMapNode(swapMgr);
+
+	//图省事直接乱改了
+	ans = swapMgr.AllocSwap(); /* bytes, need 4096 / 512 = 8 sectors  */
 	
-	swapMgr.AllocSwap(SwapperManager::BLOCK_SIZE * 2);
+	swapMgr.AllocSwap();
 
-	swapMgr.FreeSwap(2000, ans + 4);
+	swapMgr.FreeSwap(ans + 4);
 
-	ans = swapMgr.AllocSwap(SwapperManager::BLOCK_SIZE * 10);
+	ans = swapMgr.AllocSwap();
 
-	swapMgr.FreeSwap(SwapperManager::BLOCK_SIZE * 10, ans);
+	swapMgr.FreeSwap(ans);
 
 	//PrintAllMapNode(swapMgr);
 
-	swapMgr.AllocSwap(513 /* byte */ );
+	swapMgr.AllocSwap();
 
 	PrintAllMapNode(swapMgr);
 

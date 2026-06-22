@@ -5,6 +5,9 @@ unsigned int PageManager::PHY_MEM_SIZE;
 unsigned int UserPageManager::USER_PAGE_POOL_SIZE;
 const unsigned int PageManager::PAGE_SIZE;
 
+FreeList UserPageManager::freeList;
+page UserPageManager::pages[UserPageManager::freePageNum];
+
 PageManager::PageManager(PageAllocator* pgallocator)
 {
 	this->m_pAllocator = pgallocator;
@@ -109,8 +112,21 @@ int KernelPageManager::Initialize()
 }
 
 UserPageManager::UserPageManager(PageAllocator* pgallocator)
-	:PageManager(pgallocator)
+	:PageManager(pgallocator),sharedPageRoot(3,0)
 {
+	unsigned int userSpaceStartIdx=USER_PAGE_POOL_START_ADDR/PAGE_SIZE;
+	pgallocator->Page[userSpaceStartIdx]=0;
+	unsigned int i=1;
+	for(;i<freePageNum;i++)
+	{
+		pgallocator->Page[i+userSpaceStartIdx]=0;
+		pages[i-1].next=&pages[i];
+		pages[i-1].pageNo=i-1+userSpaceStartIdx;	//一一对应，用于每个page结构体反向映射到其在pages数组中的索引
+	}
+	pages[freePageNum-1].next=NULL;
+	pages[freePageNum-1].pageNo=userSpaceStartIdx+freePageNum-1;
+	freeList.head=&pages[0];
+	freeList.tail=&pages[freePageNum-1];
 }
 
 int UserPageManager::Initialize()
@@ -124,3 +140,42 @@ int UserPageManager::Initialize()
 	return 0;
 }
 
+unsigned long UserPageManager::AllocMemory()
+{
+	page*freePage=freeList.head;
+	if(freePage!=NULL)
+	{
+		this->m_pAllocator->Page[freePage->pageNo]=1;
+		freeList.head=freePage->next;
+		if(freeList.head==NULL) freeList.tail=NULL;
+		freePage->next=NULL;
+		return freePage->pageNo<<12;
+	}
+	return 0;
+}
+
+unsigned long UserPageManager::FreeMemory(unsigned long phyAddr)
+{
+	if(phyAddr>=USER_PAGE_POOL_START_ADDR&&phyAddr<USER_END_ADDR)
+	{
+		unsigned int phyIdx=phyAddr>>12;
+		if(this->m_pAllocator->Page[phyIdx]<=0) return 0;
+		if(--this->m_pAllocator->Page[phyIdx]==0)	//页框引用次数为0，直接放在空闲链表中
+		{
+			page*freePage=&pages[phyIdx-(USER_PAGE_POOL_START_ADDR>>12)];
+			if(freeList.tail!=NULL)
+			{
+				freeList.tail->next=freePage;
+				freeList.tail=freePage;
+			}
+			else
+			{
+				freeList.head=freeList.tail=freePage;
+			}
+			freeList.tail->next=NULL;
+			return 1;
+		}
+		
+	}
+	return 0;
+}

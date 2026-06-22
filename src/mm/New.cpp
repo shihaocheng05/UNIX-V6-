@@ -1,4 +1,5 @@
 #include "New.h"
+#include "KernelAllocator.h"
 /*
  * 这个文件有问题
  * 1、返回的是空间的物理地址

@@ -3,6 +3,8 @@
 
 #include "PageTable.h"
 #include "PageDirectory.h"
+#include "VMArea.h"
+#include "Page.h"
 
 class MemoryDescriptor
 {
@@ -35,9 +37,13 @@ public:
 //	void MapToPageTable();
 	void DisplayPageTable();
 	//add
-	bool CheckUserSpaceSize( unsigned long textVirtualAddress, unsigned long textSize, unsigned long dataVirtualAddress, unsigned long dataSize, unsigned long stackSize );
-	void EstablishUserPageTable( unsigned long textVirtualAddress, unsigned long textSize, unsigned long dataVirtualAddress, unsigned long dataSize,int shared,PageDirectory*p_pgTable);
+	bool CheckUserSpaceSize( vm_area vmlist[] );
+	void EstablishUserPageTable( vm_area vmlist[],int shared,PageDirectory*p_pgTable);
 	void CopyUserPageTable(PageTable* pgTable,unsigned int Page[]);
+	/*vm新增：根据内存中的页表释放对应虚拟段所有已分配的物理页框(包括盘交换区上的)*/
+	void FreePhyPage(unsigned int sectionStartIdx,unsigned long sectionSize,bool isStack);
+	/*选择一页淘汰*/
+	page*selectVictim(PageTable*userPageTableArray);
 	/* 
 	 * @comment 原unix v6中estabur()函数，用于建立用户态地址空间的相对地址映射表，然后调用
 	 * MapToPageTable()函数将相对地址映射表加载到用户态页表中。
@@ -70,7 +76,7 @@ public:
 	unsigned long	m_DataSize;			/* 数据段长度 */
 
 	unsigned long	m_StackSize;		/* 栈段长度 */
-	//unsigned long	m_HeapSize;			/* 堆段长度 */
+	unsigned int    current;
 };
 
 #endif

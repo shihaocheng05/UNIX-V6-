@@ -37,7 +37,18 @@
                 "kind": "test",
                 "isDefault": true
             },
-            "isBackground": true // 作为后台任务, 避免堵塞gdb
+            "isBackground": true, // 作为后台任务, 避免堵塞gdb
+            "problemMatcher": {
+                "owner": "custom",
+                "pattern": {
+                    "regexp": "^$" // 匹配任意空行（或者你可以匹配bochs启动成功的特定日志）
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".*",
+                    "endsPattern": "Booting from hard disk" // 匹配bochs启动成功的日志
+                }
+            }
         },
     ],
     "version": "2.0.0"

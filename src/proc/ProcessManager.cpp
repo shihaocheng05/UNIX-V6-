@@ -51,7 +51,7 @@ void ProcessManager::SetupProcessZero()
 	u.u_MemoryDescriptor.m_DataSize = 0;
 	u.u_MemoryDescriptor.m_StackSize = 0;
 	u.u_MemoryDescriptor.m_UserPageTableArray = NULL;
-//	u.u_MemoryDescriptor.Initialize();
+	u.u_MemoryDescriptor.current=0;
 }
 
 unsigned int ProcessManager::NextUniquePid()
@@ -96,59 +96,49 @@ int ProcessManager::NewProc()
 
 	unsigned long srcAddress = current->p_addr;
 	
-	if ( !userPageManager.EnoughSpace(userPageManager.USER_PAGE_POOL_START_ADDR,userPageManager.USER_END_ADDR,child->p_size) ) /* 不成功(没有足够空间)，将父进程图像复制到盘交换区。这块还没好 */
+	if ( !userPageManager.EnoughSpace(userPageManager.USER_PAGE_POOL_START_ADDR,userPageManager.USER_END_ADDR,PageManager::PAGE_SIZE) ) /* 不成功(没有足够空间)，将父进程图像复制到盘交换区。这块还没好 */
 	{
-		current->p_stat = Process::SIDL;
-		/* 子进程p_addr指向父进程图像，因为子进程换出至交换区需要以父进程图像为蓝本 */
-		child->p_addr = current->p_addr;
-		SaveU(u.u_ssav);
-		this->XSwap(child, false, 0);
-		child->p_flag |= Process::SSWAP;
-		current->p_stat = Process::SRUN;
+		if(userPageManager.freeList.tail!=NULL)
+		{
+			Diagnose::Write("freeList remain at least one page,but Page array is full!");
+			return 1;
+		}
+		page*swapped=u.u_MemoryDescriptor.selectVictim(pgTable);	//局部置换，选择当前进程的一私有页进行换出到交换区
+		BufferManager&bfMgr=Kernel::Instance().GetBufferManager();
+		SwapperManager&swpMgr=Kernel::Instance().GetSwapperManager();
+		unsigned int blockno=swpMgr.AllocSwap();
+		if(!blockno)	//分配失败
+		{
+			Diagnose::Write("Swapper Distribution fail!");
+			return 1;
+		}
+		unsigned long virtualAddr=(u.u_MemoryDescriptor.current-1)*PageManager::PAGE_SIZE+0x400000;	//计算虚地址（因为Swap必须传入虚地址）
+		bfMgr.Swap(blockno,virtualAddr,PageManager::PAGE_SIZE,Buf::B_WRITE);
+		userPageManager.FreeMemory(swapped->pageNo<<12);
+		swapped->next=NULL;
+		pgTable->m_Entrys[u.u_MemoryDescriptor.current-1].m_Present=0;
+		pgTable->m_Entrys[u.u_MemoryDescriptor.current-1].m_PageBaseAddress=blockno;
 	}
-	else
-	{   // 成功，父进程为子进程写页表，复制父进程可交换部分。由于本设计中采用COW，暂时只复制PPDA一页
-		unsigned long desAddress = userPageManager.AllocMemory(userPageManager.USER_PAGE_POOL_START_ADDR,userPageManager.USER_END_ADDR);   // 为子进程图像分配一页PPDA
-		int n = userPageManager.PAGE_SIZE;	//复制PPDA区一页
-		child->p_addr = desAddress;
-
-		if ( NULL != pgTable )	//0#进程创建1#进程时传进来NULL
+	// 成功，父进程为子进程写页表，复制父进程可交换部分。由于本设计中采用COW，暂时只复制PPDA一页
+	unsigned long desAddress = userPageManager.AllocMemory();   // 为子进程图像分配一页PPDA
+	int n = userPageManager.PAGE_SIZE;	//复制PPDA区一页
+	child->p_addr = desAddress;
+	if ( NULL != pgTable )	//0#进程创建1#进程时传进来NULL
+	{
+		u.u_MemoryDescriptor.CopyUserPageTable(pgTable,userPageManager.m_pAllocator->Page);	//改成传入父进程的1#用户页表
+	}
+	else {
+		KernelPageManager&kernelPageManager=Kernel::Instance().GetKernelPageManager();
+		PageDirectory* pPageDirectory = u.u_procp->p_pgTable;
+		if((unsigned long)pPageDirectory->m_Entrys[1].m_PageTableBaseAddress<<12!=((unsigned long)u.u_MemoryDescriptor.m_UserPageTableArray-Machine::KERNEL_SPACE_START_ADDRESS))
 		{
-			u.u_MemoryDescriptor.CopyUserPageTable(pgTable,userPageManager.m_pAllocator->Page);	//改成传入父进程的1#用户页表
+			Diagnose::Write("pPageDirectory's UserPageTable!=MemoryDescriptor's UserPageTable!\n");
 		}
-		else {
-			KernelPageManager&kernelPageManager=Kernel::Instance().GetKernelPageManager();
-			PageDirectory* pPageDirectory = u.u_procp->p_pgTable;
-			if((unsigned long)pPageDirectory->m_Entrys[1].m_PageTableBaseAddress<<12!=((unsigned long)u.u_MemoryDescriptor.m_UserPageTableArray-Machine::KERNEL_SPACE_START_ADDRESS))
-			{
-				Diagnose::Write("pPageDirectory's UserPageTable!=MemoryDescriptor's UserPageTable!\n");
-			}
-			PageTable*pUserPageTable=u.u_MemoryDescriptor.m_UserPageTableArray;
-			u.u_MemoryDescriptor.ClearUserPageTable();
-		}
-
-		/**  这个版本容易懂
-		if ( NULL != pgTable )
-		{
-			Utility::MemCopy((unsigned long)pgTable, (unsigned long)u.u_MemoryDescriptor.m_UserPageTableArray, sizeof(PageTable) * MemoryDescriptor::USER_SPACE_PAGE_TABLE_CNT);
-
-			for (unsigned int i = 0; i < Machine::USER_PAGE_TABLE_CNT; i++)
-			{
-				for ( unsigned int j = 0; j < PageTable::ENTRY_CNT_PER_PAGETABLE; j++ )
-				{
-					if ( pgTable[i].m_Entrys[j].m_ReadWriter == 1)
-						u.u_MemoryDescriptor.m_UserPageTableArray[i].m_Entrys[j].m_PageBaseAddress =
-								pgTable[i].m_Entrys[j].m_PageBaseAddress + ((desAddress >> 12) - (srcAddress >> 12));  // 子进程私有的数据页
-				}
-			}
-		}
-
-		u.u_MemoryDescriptor.m_UserPageTableArray[0].m_Entrys[0].m_PageBaseAddress = 0;  */
-
-		while (n--)
-		{
-			Utility::CopySeg(srcAddress++, desAddress++);
-		}
+		u.u_MemoryDescriptor.ClearUserPageTable();
+	}
+	while (n--)
+	{
+		Utility::CopySeg(srcAddress++, desAddress++);
 	}
 
 	u.u_procp = current;
@@ -226,231 +216,11 @@ int ProcessManager::Swtch()
 
 void ProcessManager::Sched()
 {
-	Process* pSelected;
-	User& u = Kernel::Instance().GetUser();
-	UserPageManager&userPageManager=Kernel::Instance().GetUserPageManager();
-	KernelPageManager&kernelPageManager=Kernel::Instance().GetKernelPageManager();
-	int seconds;
-	unsigned int size;
-	/* 
-	 * 选择在交换区驻留时间最长，处于就绪状态的进程换入
-	 */
-	goto loop;
-
-sloop:
-	this->RunIn++;
-	u.u_procp->Sleep((unsigned long)&RunIn, ProcessManager::PSWP);
-
-loop:
-	X86Assembly::CLI();
-	seconds = -1;
-	for ( int i = 0; i < ProcessManager::NPROC; i++ )
+	User&u=Kernel::Instance().GetUser();
+	while(true)
 	{
-		if ( this->process[i].p_stat == Process::SRUN && (this->process[i].p_flag & Process::SLOAD) == 0 && this->process[i].p_time > seconds )
-		{
-			pSelected = &(this->process[i]);
-			seconds = pSelected->p_time;
-		}
+		u.u_procp->Sleep((unsigned long)u.u_procp,ProcessManager::PWAIT);
 	}
-
-	/* 如果没有符合条件的进程，0#进程睡眠等待有需要换入的进程 */
-	if ( -1 == seconds )
-	{
-		this->RunOut++;
-		u.u_procp->Sleep((unsigned long)&RunOut, ProcessManager::PSWP);
-		goto loop;
-	}
-
-	/* 如果有进程满足条件，需要换入，则检查是否有足够内存 */
-	X86Assembly::STI();
-	/* 计算进程换入需要的内存大小 */
-	size = pSelected->p_size;
-	/* 
-	 * 如果存在共享正文段，但是没有进程图像在内存中，引用该正文段的进程，
-	 * 即共享正文段不再内存中，换入时需要读入正文段在交换区中的副本
-	 */
-	if ( pSelected->p_textp != NULL && 0 == pSelected->p_textp->x_ccount )
-	{
-		size += pSelected->p_textp->x_size;
-	}
-//	/* 如果内存分配成功，则进行实际换入操作 */
-//	desAddress = Kernel::Instance().GetUserPageManager().AllocMemory(size);
-//	if ( NULL != desAddress )
-//	{
-//		goto found2;
-//	}
-	if(userPageManager.EnoughSpace(userPageManager.USER_PAGE_POOL_START_ADDR,userPageManager.USER_END_ADDR,size))
-	{
-		goto found2;
-	}
-
-	/*
-	 * 分配内存失败情况下，换出内存中进程，腾出空间。
-	 * 换出原则：从易到难；依次将低优先权睡眠状态(SWAIT)-->
-	 * 暂停状态(SSTOP)-->高优先权睡眠状态(SSLEEP)-->就绪状态(SRUN)进程换出。
-	 */
-	X86Assembly::CLI();
-	for ( int i = 0; i < ProcessManager::NPROC; i++ )
-	{
-		if ( this->process[i].p_flag & (Process::SSYS | Process::SLOCK | Process::SLOAD) == Process::SLOAD && (this->process[i].p_stat == Process::SWAIT || this->process[i].p_stat == Process::SSTOP) )
-		{
-			goto found1;
-		}
-	}
-
-	/* 
-	 * 在换出高优先权睡眠状态(SSLEEP)、就绪状态(SRUN)进程而腾出内存之前，
-	 * 检查待换入进程在交换区驻留时间是否已达到3秒，低于则不予换入
-	 */
-	if ( seconds < 3 )
-	{
-		goto sloop;
-	}
-
-	seconds = -1;
-	for ( int i = 0; i < ProcessManager::NPROC; i++ )
-	{
-		if ( this->process[i].p_flag & (Process::SSYS | Process::SLOCK | Process::SLOAD) == Process::SLOAD && (this->process[i].p_stat == Process::SWAIT || this->process[i].p_stat == Process::SSTOP) && pSelected->p_time > seconds )
-		{
-			pSelected = &(this->process[i]);
-			seconds = pSelected->p_time;
-		}
-	}
-
-	/* 如果要换出SSLEEP、SRUN状态进程，先检查该进程驻留内存时间是否超过2秒，否则不予换出 */
-	if ( seconds < 2 )
-	{
-		goto sloop;
-	}
-
-	/* 换出pSelected指向的被选中进程 */
-found1:
-	X86Assembly::STI();
-	pSelected->p_flag &= ~Process::SLOAD;
-	this->XSwap(pSelected, true, 0);
-	/* 腾出内存空间后再次尝试换入进程 */
-	goto loop;
-
-	/* 已经分配好足够的内存，进行实际的换入操作 */
-found2:
-	BufferManager& bufMgr = Kernel::Instance().GetBufferManager();
-	PageDirectory*pDirectory=pSelected->p_pgTable;	//被选中进程的页目录
-	PageTable*userPageTableArray=(PageTable*)((pDirectory->m_Entrys[1].m_PageTableBaseAddress<<12)+Machine::KERNEL_SPACE_START_ADDRESS);
-	//做了一个修改：因为映射1#用户页表需要用到Memorydescriptor，因此先换入盘交换区的进程图像。
-	pSelected->p_size=(pSelected->p_size+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE*PageManager::PAGE_SIZE;
-	//先在页表区分配PPDA，后面再复制到用户区。
-	unsigned long tmp_pAddr=kernelPageManager.AllocMemory(kernelPageManager.KERNEL_PAGE_POOL_START_ADDR,kernelPageManager.KERNEL_PAGE_POOL_END_ADDR)+Machine::KERNEL_SPACE_START_ADDRESS;
-	if ( bufMgr.Swap(pSelected->p_addr /* blkno */, tmp_pAddr, PageManager::PAGE_SIZE, Buf::B_READ) == false )
-	{
-		Utility::Panic("Swap Error");
-		return;
-	}
-	User&inU=*(User*)tmp_pAddr;
-	unsigned long textStartAddr=inU.u_MemoryDescriptor.m_TextStartAddress;
-	unsigned int textStartIdx=(textStartAddr%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
-//	unsigned int textPageNum=inU.u_MemoryDescriptor.m_TextSize/PageManager::PAGE_SIZE;
-	unsigned long dataStartAddr=inU.u_MemoryDescriptor.m_DataStartAddress;
-	unsigned int dataStartIdx=(dataStartAddr%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
-	unsigned int dataPageNum=(inU.u_MemoryDescriptor.m_DataSize+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE;
-	/*分配其余可交换部分*/
-	for(unsigned int i=1;i<pSelected->p_size/PageManager::PAGE_SIZE;i++)
-	{
-		unsigned long tmpAddr=kernelPageManager.AllocMemory(kernelPageManager.KERNEL_PAGE_POOL_START_ADDR,kernelPageManager.KERNEL_PAGE_POOL_END_ADDR)+Machine::KERNEL_SPACE_START_ADDRESS;
-		unsigned long phyAddr=userPageManager.AllocMemory(userPageManager.USER_PAGE_POOL_START_ADDR,userPageManager.USER_END_ADDR);
-		if(i<=dataPageNum)	//数据段与只读数据段与bss段
-		{
-			userPageTableArray->m_Entrys[dataStartIdx+i-1].m_ReadWriter=1;
-			userPageTableArray->m_Entrys[dataStartIdx+i-1].m_Present=1;		//存疑
-			userPageTableArray->m_Entrys[dataStartIdx+i-1].m_UserSupervisor=1;
-			userPageTableArray->m_Entrys[dataStartIdx+i-1].m_PageBaseAddress=phyAddr/PageManager::PAGE_SIZE;
-			if ( bufMgr.Swap(pSelected->p_addr+i*8 /* blkno */, tmpAddr, PageManager::PAGE_SIZE, Buf::B_READ) == false )
-			{
-				Utility::Panic("Swap Error");
-				return;
-			}
-		}
-		else	//栈段
-		{
-			int reorder=i-dataPageNum;
-			userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-reorder].m_ReadWriter=1;
-			userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-reorder].m_Present=1;
-			userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-reorder].m_UserSupervisor=1;
-			userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-reorder].m_PageBaseAddress=phyAddr/PageManager::PAGE_SIZE;
-			if ( bufMgr.Swap(pSelected->p_addr+i*8 /* blkno */, tmpAddr, PageManager::PAGE_SIZE, Buf::B_READ) == false )
-			{
-				Utility::Panic("Swap Error");
-				return;
-			}
-		}
-		tmpAddr-=Machine::KERNEL_SPACE_START_ADDRESS;
-		unsigned long src=tmpAddr;
-		unsigned int n=PageManager::PAGE_SIZE;
-		while(n--)
-		{
-			Utility::CopySeg(src++,phyAddr++);
-		}
-		kernelPageManager.FreeMemory(tmpAddr);
-	}
-	Kernel::Instance().GetSwapperManager().FreeSwap(pSelected->p_size, pSelected->p_addr /* blkno */);
-	unsigned long pAddr=userPageManager.AllocMemory(userPageManager.USER_PAGE_POOL_START_ADDR,userPageManager.USER_END_ADDR);
-	pSelected->p_addr=pAddr;
-	int n=PageManager::PAGE_SIZE;
-	tmp_pAddr-=Machine::KERNEL_SPACE_START_ADDRESS;
-	unsigned long src=tmp_pAddr;
-	while(n--)
-	{
-		Utility::CopySeg(src++,pAddr++);
-	}
-	kernelPageManager.FreeMemory(tmp_pAddr);
-	/* 
-	* 如果存在共享正文段，但是没有进程图像在内存中，引用该正文段的进程，
-	* 即共享正文段不再内存中，换入时需要读入正文段在交换区中的副本
-	*/
-	if ( pSelected->p_textp != NULL )
-	{
-		Text* pText = pSelected->p_textp;
-		if ( pText->x_ccount == 0 )
-		{
-			pText->x_size=(pText->x_size+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE*PageManager::PAGE_SIZE;
-			for(unsigned int i=0;i<pText->x_size/PageManager::PAGE_SIZE;i++)
-			{
-				unsigned long tmpAddr=kernelPageManager.AllocMemory(kernelPageManager.KERNEL_PAGE_POOL_START_ADDR,kernelPageManager.KERNEL_PAGE_POOL_END_ADDR)+Machine::KERNEL_SPACE_START_ADDRESS;
-				unsigned long phyAddr=userPageManager.AllocMemory(userPageManager.USER_PAGE_POOL_START_ADDR,userPageManager.USER_END_ADDR);
-				/* 因为共享正文段，和进程ppda、数据段、堆栈段在交换区中是分开存放的，所以先换入共享正文段 */
-				//上面这行注释是上个版本的
-				if(i==0)
-				{
-					/* 共享正文段在内存中的起始地址 */
-					pText->x_caddr = phyAddr;
-					//desAddress += pText->x_size;
-				}
-				userPageTableArray->m_Entrys[textStartIdx+i].m_Present=1;
-				userPageTableArray->m_Entrys[textStartIdx+i].m_ReadWriter=0;
-				userPageTableArray->m_Entrys[textStartIdx+i].m_UserSupervisor=1;
-				userPageTableArray->m_Entrys[textStartIdx+i].m_PageBaseAddress=phyAddr/PageManager::PAGE_SIZE;
-				if ( bufMgr.Swap(pText->x_daddr+i*8, tmpAddr, PageManager::PAGE_SIZE, Buf::B_READ) == false )
-				{
-					Utility::Panic("Swap Error");
-					return;
-				}
-				tmpAddr-=Machine::KERNEL_SPACE_START_ADDRESS;
-				unsigned long src=tmpAddr;
-				unsigned int n=PageManager::PAGE_SIZE;
-				while(n--)
-				{
-					Utility::CopySeg(src++,phyAddr++);
-				}
-				kernelPageManager.FreeMemory(tmpAddr);
-			}
-		}
-		pText->x_ccount++;
-	}
-	/* 换入剩余部分图像：ppda、数据段、堆栈段原本位置 */
-	pSelected->p_flag |= Process::SLOAD;
-	pSelected->p_time = 0;
-	goto loop;
-
-	return;
 }
 
 void ProcessManager::Wait()
@@ -461,6 +231,7 @@ void ProcessManager::Wait()
 	SwapperManager& swapperMgr = Kernel::Instance().GetSwapperManager();
 	BufferManager& bufMgr = Kernel::Instance().GetBufferManager();
 	KernelPageManager& kernelPgMgr=Kernel::Instance().GetKernelPageManager();
+	UserPageManager&userPgMgr=Kernel::Instance().GetUserPageManager();
 	
 	Diagnose::Write("Process %d finding dead son. They are ",u.u_procp->p_pid);
 	while(true)
@@ -469,7 +240,7 @@ void ProcessManager::Wait()
 		{
 			if ( u.u_procp->p_pid == process[i].p_ppid )
 			{
-				Diagnose::Write("Process %d (Status:%d)  ",process[i].p_pid,process[i].p_stat);
+				Diagnose::Write("Process %d (Status:%d)  \n",process[i].p_pid,process[i].p_stat);
 				hasChild = true;
 				/* 睡眠等待直至子进程结束 */
 				if( Process::SZOMB == process[i].p_stat )
@@ -486,10 +257,17 @@ void ProcessManager::Wait()
 					process[i].p_pgTable=NULL;
 
 					/* 读入swapper中子进程u结构副本 */
-					Buf* pBuf = bufMgr.Bread(DeviceManager::ROOTDEV, process[i].p_addr);
-					swapperMgr.FreeSwap(BufferManager::BUFFER_SIZE, process[i].p_addr);
-					User* pUser = (User *)pBuf->b_addr;
-
+					//先在页表区内存中分配一个临时页框用于读入PPDA
+					unsigned long userAddr=kernelPgMgr.AllocMemory(kernelPgMgr.KERNEL_PAGE_POOL_START_ADDR,kernelPgMgr.KERNEL_PAGE_POOL_END_ADDR)+Machine::KERNEL_SPACE_START_ADDRESS;
+					unsigned blkno=process[i].p_addr;
+					User* pUser = (User *)userAddr;
+					for(unsigned int i=0;i<PageManager::PAGE_SIZE;i+=BufferManager::BUFFER_SIZE,blkno++)
+					{
+						Buf* pBuf = bufMgr.Bread(DeviceManager::ROOTDEV, blkno);
+						Utility::DWordCopy((int *)pBuf->b_addr,(int *)((char*)pUser+i),BufferManager::BUFFER_SIZE / sizeof(int));
+						bufMgr.Brelse(pBuf);
+					}
+					swapperMgr.FreeSwap(process[i].p_addr);
 					/* 把子进程的时间加到父进程上 */
 					u.u_cstime += pUser->u_cstime +	pUser->u_stime;
 					u.u_cutime += pUser->u_cutime + pUser->u_utime;
@@ -497,10 +275,7 @@ void ProcessManager::Wait()
 					int* pInt = (int *)u.u_arg[0];
 					/* 获取子进程exit(int status)的返回值 */
 					*pInt = pUser->u_arg[0];
-
-					/* 如果此处没有Brelse()系统会发生什么-_- */
-					bufMgr.Brelse(pBuf);
-					Diagnose::Write("end wait\n");
+					kernelPgMgr.FreeMemory(userAddr-Machine::KERNEL_SPACE_START_ADDRESS);
 					return;
 				}
 			}
@@ -508,9 +283,7 @@ void ProcessManager::Wait()
 		if (true == hasChild)
 		{
 			/* 睡眠等待直至子进程结束 */
-			Diagnose::Write("wait until child process Exit! ");
 			u.u_procp->Sleep((unsigned long)u.u_procp, ProcessManager::PWAIT);
-			Diagnose::Write("end sleep\n");
 			continue;	/* 回到外层while(true)循环 */
 		}
 		else
@@ -575,6 +348,7 @@ void ProcessManager::Exec()
 	UserPageManager& userPgMgr = Kernel::Instance().GetUserPageManager();
 	KernelPageManager& kernelPgMgr = Kernel::Instance().GetKernelPageManager();
 	BufferManager& bufMgr = Kernel::Instance().GetBufferManager();
+	SwapperManager& swpMgr=Kernel::Instance().GetSwapperManager();
 	(void)kernelPgMgr;
 
 	Diagnose::Write("Process %d execing\n",u.u_procp->p_pid);
@@ -611,9 +385,24 @@ void ProcessManager::Exec()
         return;
     }
 
-	if ( parser.TextSize + parser.DataSize + parser.StackSize  + PageManager::PAGE_SIZE > MemoryDescriptor::USER_SPACE_SIZE - parser.TextAddress)
+	//新的文件合法性判断逻辑
+	bool legalFile=1;
+	unsigned int totalLength=parser.HeapSize+parser.StackSize;
+	for(unsigned int i=0;i<parser.BSS_SECTION_IDX;i++)
+	{
+		if(parser.sectionHeaders[i].VirtualAddress+parser.sectionHeaders[i].Misc.VirtualSize>parser.sectionHeaders[i+1].VirtualAddress)
+		{
+			legalFile=0;
+		}
+		totalLength+=parser.sectionHeaders[i].Misc.VirtualSize;
+	}
+	totalLength+=parser.sectionHeaders[parser.BSS_SECTION_IDX].Misc.VirtualSize;
+
+	if(totalLength+PageManager::PAGE_SIZE>MemoryDescriptor::USER_SPACE_SIZE-parser.TextAddress||!legalFile)
 	{
 		fileMgr.m_InodeTable->IPut(pInode);
+		KernelPageManager& kpm = Kernel::Instance().GetKernelPageManager();
+		kpm.FreeMemory((unsigned long)parser.sectionHeaders - Machine::KERNEL_SPACE_START_ADDRESS);
 		u.u_error = User::ENOMEM;
 		return;
 	}
@@ -623,38 +412,21 @@ void ProcessManager::Exec()
 	 * 位于进程图像改换前的用户栈中，将参数备份到fakeStack中，然后可以释放原进程图像，
 	 * 分配好新进程图像之后，再将fakeStack中的备份参数拷贝到新进程的用户栈中。
 	 */
-	//unsigned long fakeStack = kernelPgMgr.AllocMemory(parser.StackSize);
-	//先释放栈区并重建，其他后面再来
+	/*释放原进程栈段*/
 	PageTable*userPageTableArray=u.u_MemoryDescriptor.GetUserPageTableArray();
-	for(unsigned int i=0;i<u.u_MemoryDescriptor.m_StackSize/userPgMgr.PAGE_SIZE;i++)
-	{
-		if(userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_Present==1)
-		{
-			unsigned long phyIdx=(unsigned long)userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_PageBaseAddress<<12;
-			userPgMgr.FreeMemory(phyIdx);
-			userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_Present=0;
-		}
-	}
+	u.u_MemoryDescriptor.FreePhyPage(0,u.u_MemoryDescriptor.m_StackSize,1);
 
-	unsigned long fakeStack = userPgMgr.AllocMemory(userPgMgr.USER_PAGE_POOL_START_ADDR,userPgMgr.USER_END_ADDR);	//直接分配一页用户栈区域
-	unsigned int stackPhyIdx=fakeStack/userPgMgr.PAGE_SIZE;
+	unsigned int stackPhyIdx=userPgMgr.AllocMemory()>>12;
+	if(stackPhyIdx==0)
+	{
+		u.u_error = User::ENOMEM;
+		return;
+	}
 	userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1].m_Present=1;
 	userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1].m_ReadWriter=1;
 	userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1].m_UserSupervisor=1;
 	userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1].m_PageBaseAddress=stackPhyIdx;
-
-	/* 堆栈段初始化长度 */
-	u.u_MemoryDescriptor.m_StackSize = parser.StackSize;
-	//分配剩余初始栈
-	unsigned int stackPageNum=u.u_MemoryDescriptor.m_StackSize/userPgMgr.PAGE_SIZE;
-	for(unsigned int i=1;i<stackPageNum;i++)
-	{
-		unsigned long phyIdx=userPgMgr.AllocMemory(userPgMgr.USER_PAGE_POOL_START_ADDR,userPgMgr.USER_END_ADDR)/userPgMgr.PAGE_SIZE;
-		userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_Present=1;
-		userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_ReadWriter=1;
-		userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_UserSupervisor=1;
-		userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1-i].m_PageBaseAddress=phyIdx;
-	}
+	userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-1].m_Used=1;
 
 	int argc = u.u_arg[1];
 	char** argv = (char **)u.u_arg[2];
@@ -701,42 +473,94 @@ void ProcessManager::Exec()
 	esp -= sizeof(int);
 	Utility::MemCopy((unsigned long)&argc, esp, sizeof(int));	/* Done! */
 
-
-	/* 释放原进程图像的共享正文段，数据段，堆栈段 */
+	/* 释放原进程图像的共享正文段，数据段，只读数据段，BSS段，堆段 */
 	if ( u.u_procp->p_textp != NULL )
 	{
-		if(u.u_procp->p_textp->x_ccount>0)
+		if ( --u.u_procp->p_textp->x_count == 0 )
 		{
-			if(--u.u_procp->p_textp->x_ccount==0)
+			//通过内存中的页表释放所有已分配的物理页框(包括盘交换区上的)
+			PageTable*userPageTableArray=(PageTable*)((u.u_procp->p_textp->x_pgTable->m_Entrys[1].m_PageTableBaseAddress<<12)+Machine::KERNEL_SPACE_START_ADDRESS);
+			unsigned int textStartIdx=u.vm_list[u.TEXT_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP/PageManager::PAGE_SIZE;
+			unsigned int rdataStartIdx=(u.vm_list[u.RDATA_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
+			u.u_MemoryDescriptor.FreePhyPage(textStartIdx,u.u_procp->p_textp->x_size,0);
+			u.u_MemoryDescriptor.FreePhyPage(rdataStartIdx,u.vm_list[u.RDATA_IDX].v_length,0);
+			Kernel::Instance().GetFileManager().m_InodeTable->IPut(u.u_procp->p_textp->x_iptr);
+			u.u_procp->p_textp->x_iptr = NULL;
+		}
+		else
+		{
+			ProcessManager&processMgr=Kernel::Instance().GetProcessManager();
+			u.u_procp->p_textp->x_pgTable=NULL;
+			for(int i=0;i<processMgr.NPROC;i++)
 			{
-				unsigned int textStartIdx=u.u_MemoryDescriptor.m_TextStartAddress%PageTable::SIZE_PER_PAGETABLE_MAP;
-				textStartIdx/=PageManager::PAGE_SIZE;
-				for(unsigned int i=0;i<u.u_procp->p_textp->x_size/userPgMgr.PAGE_SIZE;i++)
+				if(processMgr.process[i].p_textp==u.u_procp->p_textp&&processMgr.process[i].p_stat!=Process::SSTOP)
 				{
-					userPageTableArray->m_Entrys[textStartIdx+i].m_Present=0;	//禁用映射
+					u.u_procp->p_textp->x_pgTable=processMgr.process[i].p_pgTable;
+					break;
 				}
 			}
 		}
-		u.u_procp->p_textp->XFree();
 		u.u_procp->p_textp = NULL;
 	}
-//	u.u_procp->Expand(ProcessManager::USIZE);	//缩小可交换部分，只留PPDA区
+
 	unsigned int dataStartIdx=u.u_MemoryDescriptor.m_DataStartAddress%PageTable::SIZE_PER_PAGETABLE_MAP;
 	dataStartIdx/=PageManager::PAGE_SIZE;
-	for(unsigned int i=0;i<u.u_MemoryDescriptor.m_DataSize/userPgMgr.PAGE_SIZE;i++)
-	{
-		unsigned long phyIdx=(unsigned long)userPageTableArray->m_Entrys[dataStartIdx+i].m_PageBaseAddress<<12;
-		userPgMgr.FreeMemory(phyIdx);
-		userPageTableArray->m_Entrys[dataStartIdx+i].m_Present=0;
-	}
+	u.u_MemoryDescriptor.FreePhyPage(dataStartIdx,u.u_MemoryDescriptor.m_DataSize,0);
+	unsigned int bssStartIdx=(u.vm_list[u.BSS_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
+	unsigned int heapStartIdx=(u.vm_list[u.HEAP_IDX].v_start%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
+	u.u_MemoryDescriptor.FreePhyPage(bssStartIdx,u.vm_list[u.BSS_IDX].v_length,0);
+	u.u_MemoryDescriptor.FreePhyPage(heapStartIdx,u.vm_list[u.HEAP_IDX].v_length,0);
 
-		/* 获取分析PE头结构得到正文段的起始地址、长度 */
-	u.u_MemoryDescriptor.m_TextStartAddress = parser.TextAddress;
-	u.u_MemoryDescriptor.m_TextSize = parser.TextSize;
+	//读取PE文件
+	/*先hardcode vm_area的顺序，代码段，数据段，只读数据段，BSS段初始化*/
+	for(unsigned int i=0;i<parser.IDATA_SECTION_IDX;i++)
+	{
+		u.vm_list[i].v_start=(parser.sectionHeaders[i].VirtualAddress+parser.ntHeader.OptionalHeader.ImageBase+PageManager::PAGE_SIZE-1)>>12<<12;
+		u.vm_list[i].v_length=(parser.sectionHeaders[i].Misc.VirtualSize+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE*PageManager::PAGE_SIZE;		//虚空间内，要求按页对齐
+		u.vm_list[i].f_offset=parser.sectionHeaders[i].PointerToRawData;	//文件中偏移量
+		u.vm_list[i].f_length=parser.sectionHeaders[i].Misc.VirtualSize;	//文件中实际长度，实际上暂时没有用到
+		u.vm_list[i].v_Present=1;
+		u.vm_list[i].v_UserSupervisor=1;
+		u.vm_list[i].next=&u.vm_list[i+1];
+	}
+	/*BSS区别*/
+	if(u.vm_list[u.BSS_IDX].v_length==0)
+	{
+		u.vm_list[u.BSS_IDX].v_length=parser.ntHeader.OptionalHeader.SizeOfUninitializedData;
+	}
+	u.vm_list[u.BSS_IDX].f_length=0;
+	/*虚拟段个性化*/
+	u.vm_list[u.TEXT_IDX].v_ReadWriter=0;
+	u.vm_list[u.DATA_IDX].v_ReadWriter=1;
+	u.vm_list[u.RDATA_IDX].v_ReadWriter=0;
+	u.vm_list[u.BSS_IDX].v_ReadWriter=1;
+	/* 堆栈段vm_area初始化 */
+	u.vm_list[u.HEAP_IDX].v_start=(u.vm_list[parser.BSS_SECTION_IDX].v_start+u.vm_list[parser.BSS_SECTION_IDX].v_length+PageManager::PAGE_SIZE-1)>>12<<12;//堆默认在BSS后面跟着
+	u.vm_list[u.HEAP_IDX].v_length=(parser.HeapSize+PageManager::PAGE_SIZE-1)>>12<<12;
+	u.vm_list[u.HEAP_IDX].f_offset=0;
+	u.vm_list[u.HEAP_IDX].f_length=parser.HeapSize;
+	u.vm_list[u.HEAP_IDX].v_Present=1;
+	u.vm_list[u.HEAP_IDX].v_ReadWriter=1;
+	u.vm_list[u.HEAP_IDX].v_UserSupervisor=1;
+	u.vm_list[u.HEAP_IDX].next=&u.vm_list[u.STACK_IDX];
+
+	u.vm_list[u.STACK_IDX].v_length=(parser.StackSize+PageManager::PAGE_SIZE-1)>>12<<12;	//栈位置默认接壤用户空间底部8M
+	u.vm_list[u.STACK_IDX].v_start=u.u_MemoryDescriptor.USER_SPACE_SIZE-u.vm_list[u.STACK_IDX].v_length;
+	u.u_MemoryDescriptor.m_StackSize=u.vm_list[u.STACK_IDX].v_length;
+	u.vm_list[u.STACK_IDX].f_length=0;
+	u.vm_list[u.STACK_IDX].f_offset=parser.StackSize;
+	u.vm_list[u.STACK_IDX].v_Present=1;
+	u.vm_list[u.STACK_IDX].v_ReadWriter=1;
+	u.vm_list[u.STACK_IDX].v_UserSupervisor=1;
+	u.vm_list[u.STACK_IDX].next=NULL;
+
+	/* 获取分析PE头结构得到正文段的起始地址、长度 */
+	u.u_MemoryDescriptor.m_TextStartAddress = u.vm_list[u.TEXT_IDX].v_start;
+	u.u_MemoryDescriptor.m_TextSize = u.vm_list[u.TEXT_IDX].v_length;
 
 	/* 数据段的起始地址、长度 */
-	u.u_MemoryDescriptor.m_DataStartAddress = parser.DataAddress;
-	u.u_MemoryDescriptor.m_DataSize = parser.DataSize;
+	u.u_MemoryDescriptor.m_DataStartAddress = u.vm_list[u.DATA_IDX].v_start;
+	u.u_MemoryDescriptor.m_DataSize = u.vm_list[u.DATA_IDX].v_length;
 
 	Process::ProcessState p_stat=u.u_procp->p_stat;
 	u.u_procp->p_stat=Process::SSTOP;
@@ -754,7 +578,6 @@ void ProcessManager::Exec()
 		else if ( pInode == this->text[i].x_iptr )		/* 如果，这不是一个空闲text结构，看一下text结构指向的可执行文件是exec系统调用要执行的应用程序吗？ */
 		{
 			this->text[i].x_count++;
-			this->text[i].x_ccount++;
 			u.u_procp->p_textp = &(this->text[i]);
 			pText = NULL;	/* 与其它进程共享同一正文段，则pText重新清零，否则指向一空闲Text结构 */
 			break;
@@ -775,14 +598,10 @@ void ProcessManager::Exec()
 		 * 导致和之前进程共享同一Text结构，即同一正文段，而实际上本该是两个独立的程序。
 		 */
 		pInode->i_count++;
-
-		pText->x_ccount = 1;
 		pText->x_count = 1;
 		pText->x_iptr = pInode;
 		pText->x_size = u.u_MemoryDescriptor.m_TextSize;
-		/* 为正文段分配内存，而具体正文段内容的读入需要等到建立页表映射之后，再从mapAddress地址起始的exe文件中读入 */
-//		pText->x_caddr = userPgMgr.AllocMemory(pText->x_size);
-		pText->x_daddr = Kernel::Instance().GetSwapperManager().AllocSwap(pText->x_size);
+		/* 为正文段分配内存的步骤在vm版本不再需要，采用惰性分配方式 */
 		pText->x_pgTable=u.u_procp->p_pgTable;
 		/* 建立u区和Text结构的勾连关系 */
 		u.u_procp->p_textp = pText;
@@ -793,67 +612,19 @@ void ProcessManager::Exec()
 		sharedText = 1;
 	}
 
-	unsigned int newSize = ProcessManager::USIZE + u.u_MemoryDescriptor.m_DataSize + u.u_MemoryDescriptor.m_StackSize;
-	(void)newSize;
-	if ( false == u.u_MemoryDescriptor.CheckUserSpaceSize(parser.TextAddress, parser.TextSize, parser.DataAddress, parser.DataSize, parser.StackSize) )
-	{
-		return;   // out of virtual space. fail
-	}
-
-//	u.u_procp->Expand(newSize);
-	Diagnose::Write("Process %x, p_addr %x, x_addr %x, p_size %x, x_size %x\n",
-			u.u_procp->p_pid,u.u_procp->p_addr,u.u_procp->p_textp->x_caddr,u.u_procp->p_size,u.u_procp->p_textp->x_size);
+	Diagnose::Write("Process %x, p_addr %x, p_size %x, x_size %x\n",
+			u.u_procp->p_pid,u.u_procp->p_addr,u.u_procp->p_size,u.u_procp->p_textp->x_size);
 	
 	if(sharedText)
 	{
-		u.u_MemoryDescriptor.EstablishUserPageTable(parser.TextAddress, parser.TextSize, parser.DataAddress, parser.DataSize,1,pText->x_pgTable);
+		u.u_MemoryDescriptor.EstablishUserPageTable(u.vm_list,1,pText->x_pgTable);
 	}
 	else
 	{
-		u.u_MemoryDescriptor.EstablishUserPageTable(parser.TextAddress, parser.TextSize, parser.DataAddress, parser.DataSize,0,NULL);
+		u.u_MemoryDescriptor.EstablishUserPageTable(u.vm_list,0,NULL);
 	}
-//	u.u_MemoryDescriptor.MapToPageTable();
-//  u.u_MemoryDescriptor.DisplayPageTable();
 
-	/* 从exe文件中依次读入.text段、.data段、.rdata段、.bss段 */
-	parser.Relocate(pInode, sharedText);
-
-	/* .text段在swap分区上留复本 */
-	if(sharedText == 0)
-	{
-		u.u_procp->p_flag |= Process::SLOCK;
-		pText->x_size=(pText->x_size+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE*PageManager::PAGE_SIZE;
-		int textPageNum=pText->x_size/PageManager::PAGE_SIZE;
-		int blkno=pText->x_daddr;
-		PageTable*userPageTableArray=u.u_MemoryDescriptor.m_UserPageTableArray;
-		unsigned int textStartIdx=(u.u_MemoryDescriptor.m_TextStartAddress%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
-		for(int i=0;i<textPageNum;i++,blkno+=8)
-		{
-			unsigned long phyAddr=userPageTableArray->m_Entrys[textStartIdx+i].m_PageBaseAddress<<12;
-			bufMgr.Swap(blkno, phyAddr, PageManager::PAGE_SIZE, Buf::B_WRITE);
-		}
-		u.u_procp->p_flag &= ~Process::SLOCK;
-	}
-	/* 将fakeStack中备份的用户栈参数复制到新进程图像的用户栈中 */
-	//Utility::MemCopy(fakeStack | 0xC0000000, MemoryDescriptor::USER_SPACE_SIZE - parser.StackSize, parser.StackSize);
-	/* 释放用于读入exe文件和备份用户栈参数的内存：mapAddress和fakeStack */
-	
-
-	/* 
-	  * 将runtime()、SignalHandler()函数拷贝到进程用户态地址空间0x00000000线性地址处，runtime()
-	  * 用于ring0退出到ring3特权级之后执行的代码，SignalHandler()为进程的信号处理函数入口，负责
-	  * 调用具体信号的Handler。每一个进程0x00000000线性地址处都应该有一份独立的runtime()及SignalHandler()
-	  * 函数副本！
-	  */
-//	unsigned char* runtimeSrc = (unsigned char*)runtime;
-//	unsigned char* runtimeDst = 0x00000000;
-//	for (unsigned int i = 0; i < (unsigned long)ExecShell - (unsigned long)runtime; i++)
-//	{
-//		*runtimeDst++ = *runtimeSrc++;
-//	}
-
-	/* 释放Inode，减少ExeCnt计数值 */
-	fileMgr.m_InodeTable->IPut(pInode);
+	/* 减少ExeCnt计数值 */
 	if ( this->ExeCnt >= NEXEC )
 	{
 		WakeUpAll((unsigned long)&ExeCnt);
@@ -871,6 +642,48 @@ void ProcessManager::Exec()
 	{
 		u.u_ar0[i] = 0;     /* 下标写成  User::EAX + i 可读性要强一些，但是运算速度慢了。就小抠，追求速度吧 */
 	}
+
+	 /* 预分配 data 段第一页，防止内核 syscall 中 pwd 读 user buffer 时缺页 */
+	if (u.vm_list[u.DATA_IDX].v_length > 0)
+	{
+		unsigned int dataVirtualIdx = (u.vm_list[u.DATA_IDX].v_start
+    	    % PageTable::SIZE_PER_PAGETABLE_MAP) / PageManager::PAGE_SIZE;
+    	unsigned long dataPhy = userPgMgr.AllocMemory();
+    	if (dataPhy) {
+    	    PageTable* pt = u.u_MemoryDescriptor.m_UserPageTableArray;
+    	    pt->m_Entrys[dataVirtualIdx].m_PageBaseAddress = dataPhy >> 12;
+    	    pt->m_Entrys[dataVirtualIdx].m_Present = 1;
+    	    pt->m_Entrys[dataVirtualIdx].m_ReadWriter = 1;
+    	    pt->m_Entrys[dataVirtualIdx].m_UserSupervisor = 1;
+    	    pt->m_Entrys[dataVirtualIdx].m_Used = 1;
+    	        u.u_IOParam.m_Base = (unsigned char *)(u.vm_list[u.DATA_IDX].v_start);
+    	        u.u_IOParam.m_Offset = u.vm_list[u.DATA_IDX].f_offset;
+    	        u.u_IOParam.m_Count = PageManager::PAGE_SIZE;
+    	        pInode->ReadI();
+		}
+	}
+    
+    // BSS 首页
+	if(u.vm_list[u.BSS_IDX].v_length > 0)
+	{
+		unsigned int idx = (u.vm_list[u.BSS_IDX].v_start % 0x400000) / 0x1000;
+    	unsigned long p2 = userPgMgr.AllocMemory();
+    	if (p2) {
+    	        PageTable* pt = u.u_MemoryDescriptor.m_UserPageTableArray;
+    	    pt->m_Entrys[idx].m_PageBaseAddress = p2 >> 12;
+    	    pt->m_Entrys[idx].m_Present = 1;
+    	    pt->m_Entrys[idx].m_ReadWriter = 1;
+    	    pt->m_Entrys[idx].m_UserSupervisor = 1;
+    	    pt->m_Entrys[idx].m_Used = 1;
+    	        unsigned char *bssBase = (unsigned char *)(u.vm_list[u.BSS_IDX].v_start);
+    	        for (unsigned int j = 0; j < PageManager::PAGE_SIZE; j++) {
+    	            bssBase[j] = 0;
+    	        }
+    	}
+	}
+
+	KernelPageManager& kpm = Kernel::Instance().GetKernelPageManager();
+	kpm.FreeMemory((unsigned long)parser.sectionHeaders - Machine::KERNEL_SPACE_START_ADDRESS);
 
 	/* 将exe程序的入口地址放入核心栈现场保护区中的EAX作为系统调用返回值，这个是runtime要用  */
 	u.u_ar0[User::EAX] = parser.EntryPointAddress;
@@ -978,127 +791,6 @@ void ProcessManager::WakeUpAll(unsigned long chan)
 		{
 			this->process[i].SetRun();
 		}
-	}
-}
-
-void ProcessManager::XSwap( Process* pProcess, bool bFreeMemory, int size )
-{
-	if ( 0 == size)
-	{
-		size = pProcess->p_size;
-	}
-
-	/* blkno记录分配到的交换区起始扇区号 */
-	int blkno = Kernel::Instance().GetSwapperManager().AllocSwap(pProcess->p_size);
-	if ( 0 == blkno )
-	{
-		Utility::Panic("Out of Swapper Space");
-	}
-	KernelPageManager&kernelPageManager=Kernel::Instance().GetKernelPageManager();
-	//在页表区临时借用一页用于存放PPDA。
-	unsigned long tmp_pAddr=kernelPageManager.AllocMemory(kernelPageManager.KERNEL_PAGE_POOL_START_ADDR,kernelPageManager.KERNEL_PAGE_POOL_END_ADDR);
-	unsigned int n=PageManager::PAGE_SIZE;
-	unsigned long src=pProcess->p_addr;
-	unsigned long des=tmp_pAddr;
-	while(n--)
-	{
-		Utility::CopySeg(src++,des++);
-	}
-	tmp_pAddr+=Machine::KERNEL_SPACE_START_ADDRESS;
-	User&outU=*(User*)tmp_pAddr;
-	PageTable*userPageTableArray=outU.u_MemoryDescriptor.m_UserPageTableArray;
-	/* 递减进程图像在内存中，且引用该正文段的进程数 */
-	if ( pProcess->p_textp != NULL )
-	{
-		if ( pProcess->p_textp != NULL )
-		{
-			if(pProcess->p_textp->x_ccount>0)
-			{
-				if(--pProcess->p_textp->x_ccount==0)
-				{
-					unsigned int textVirtualIdx=outU.u_MemoryDescriptor.m_TextStartAddress%PageTable::SIZE_PER_PAGETABLE_MAP;
-					textVirtualIdx/=Kernel::Instance().GetUserPageManager().PAGE_SIZE;
-					for(unsigned int i=0;i<outU.u_MemoryDescriptor.m_TextSize/Kernel::Instance().GetUserPageManager().PAGE_SIZE;i++)
-					{
-						Kernel::Instance().GetUserPageManager().FreeMemory(userPageTableArray->m_Entrys[textVirtualIdx+i].m_PageBaseAddress<<12);
-						userPageTableArray->m_Entrys[textVirtualIdx+i].m_Present=0;
-					}
-				}
-			}
-		}
-	}
-	/* 上锁，防止同一进程图像被重复换出 */
-	pProcess->p_flag |= Process::SLOCK;
-	//释放了整个可交换部分，核心页表1023项不管。后面还会分配过新的PPDA区。
-	unsigned int dataStartIdx=(outU.u_MemoryDescriptor.m_DataStartAddress%PageTable::SIZE_PER_PAGETABLE_MAP)/PageManager::PAGE_SIZE;
-	unsigned int dataPageNum=(outU.u_MemoryDescriptor.m_DataSize+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE;
-	unsigned int stackPageNum=(outU.u_MemoryDescriptor.m_StackSize+PageManager::PAGE_SIZE-1)/PageManager::PAGE_SIZE;
-	int count=blkno;
-	//先换出PPDA
-	if ( false == Kernel::Instance().GetBufferManager().Swap(count, tmp_pAddr, PageManager::PAGE_SIZE, Buf::B_WRITE) )
-	{
-		Utility::Panic("Swap I/O Error");
-	}
-	count+=8;
-	for(unsigned int i=0;i<dataPageNum;i++,count+=8)
-	{
-		unsigned long tmpAddr=kernelPageManager.AllocMemory(kernelPageManager.KERNEL_PAGE_POOL_START_ADDR,kernelPageManager.KERNEL_PAGE_POOL_END_ADDR);
-		des=tmpAddr;
-		tmpAddr+=Machine::KERNEL_SPACE_START_ADDRESS;
-		unsigned int n=PageManager::PAGE_SIZE;
-		unsigned long phyAddr=userPageTableArray->m_Entrys[dataStartIdx+i].m_PageBaseAddress<<12;
-		src=phyAddr;
-		while(n--)
-		{
-			Utility::CopySeg(src++,des++);
-		}
-		if ( false == Kernel::Instance().GetBufferManager().Swap(count, tmpAddr, PageManager::PAGE_SIZE, Buf::B_WRITE) )
-		{
-			Utility::Panic("Swap I/O Error");
-		}
-		if ( bFreeMemory )
-		{	
-			Kernel::Instance().GetUserPageManager().FreeMemory(phyAddr);
-		}
-		userPageTableArray->m_Entrys[dataStartIdx+i].m_Present=0;
-		kernelPageManager.FreeMemory(tmpAddr-Machine::KERNEL_SPACE_START_ADDRESS);
-	}
-	for(unsigned int i=1;i<=stackPageNum;i++,count+=8)
-	{
-		unsigned long tmpAddr=kernelPageManager.AllocMemory(kernelPageManager.KERNEL_PAGE_POOL_START_ADDR,kernelPageManager.KERNEL_PAGE_POOL_END_ADDR);
-		des=tmpAddr;
-		tmpAddr+=Machine::KERNEL_SPACE_START_ADDRESS;
-		unsigned int n=PageManager::PAGE_SIZE;
-		unsigned long phyAddr=userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-i].m_PageBaseAddress<<12;
-		src=phyAddr;
-		while(n--)
-		{
-			Utility::CopySeg(src++,des++);
-		}
-		if ( false == Kernel::Instance().GetBufferManager().Swap(count, tmpAddr, PageManager::PAGE_SIZE, Buf::B_WRITE) )
-		{
-			Utility::Panic("Swap I/O Error");
-		}
-		if ( bFreeMemory )
-		{	
-			Kernel::Instance().GetUserPageManager().FreeMemory(phyAddr);
-		}
-		userPageTableArray->m_Entrys[PageTable::ENTRY_CNT_PER_PAGETABLE-i].m_Present=0;
-		kernelPageManager.FreeMemory(tmpAddr-Machine::KERNEL_SPACE_START_ADDRESS);
-	}
-	
-	/* 把进程图像在交换区起始扇区号记录在p_addr中，SLOAD是0、进程是盘交换区上的进程了 */
-	Kernel::Instance().GetUserPageManager().FreeMemory(pProcess->p_addr);	//释放PPDA
-	kernelPageManager.FreeMemory(tmp_pAddr-Machine::KERNEL_SPACE_START_ADDRESS);
-	pProcess->p_addr = blkno;
-	pProcess->p_flag &= ~(Process::SLOAD | Process::SLOCK);
-	/* 最近一次被换入或换出以来，在内出或交换区驻留的时间长度清零 */
-	pProcess->p_time = 0;
-
-	if ( this->RunOut )
-	{
-		this->RunOut = 0;
-		Kernel::Instance().GetProcessManager().WakeUpAll((unsigned long)&RunOut);
 	}
 }
 

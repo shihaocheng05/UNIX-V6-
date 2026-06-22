@@ -2,6 +2,8 @@
 #include "Kernel.h"
 #include "TimeInterrupt.h"
 #include "Video.h"
+#include "RadixTreeNode.h"
+#include "PageManager.h"
 
 /*==============================class OpenFileTable===================================*/
 /* 系统全局打开文件表对象实例的定义 */
@@ -111,6 +113,7 @@ Inode* InodeTable::IGet(short dev, int inumber)
 		if(index >= 0)	/* 找到内存拷贝 */
 		{
 			pInode = &(this->m_Inode[index]);
+			pInode->i_index=index;
 			/* 如果该内存Inode被上锁 */
 			if( pInode->i_flag & Inode::ILOCK )
 			{
@@ -215,6 +218,12 @@ void InodeTable::IPut(Inode *pNode)
 		/* 该文件已经没有目录路径指向它 */
 		if(pNode->i_nlink <= 0)
 		{
+			/*释放共享页缓存*/
+			UserPageManager&userPgMgr=Kernel::Instance().GetUserPageManager();
+			radix_tree_node*inode_layer_node=(radix_tree_node*)userPgMgr.sharedPageRoot.slot[pNode->i_index];
+			radix_tree_node::FreeRangePage(inode_layer_node);
+			userPgMgr.sharedPageRoot.slot[pNode->i_index]=NULL;
+			if(userPgMgr.sharedPageRoot.count>0) userPgMgr.sharedPageRoot.count--;
 			/* 释放该文件占据的数据盘块 */
 			pNode->ITrunc();
 			pNode->i_mode = 0;
@@ -278,6 +287,7 @@ Inode* InodeTable::GetFreeInode()
 		/* 如果该内存Inode引用计数为零，则该Inode表示空闲 */
 		if(this->m_Inode[i].i_count == 0)
 		{
+			this->m_Inode[i].i_index=i;
 			return &(this->m_Inode[i]);
 		}
 	}

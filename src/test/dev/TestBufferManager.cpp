@@ -155,7 +155,7 @@ bool TestSwap()
 	}
 
 	/* 分配交换区空间，并将进程图像“换出”到交换区中，运行结果使用UltraEdit打开c.img查看 */
-	int blkno = Kernel::Instance().GetSwapperManager().AllocSwap(count);
+	int blkno = Kernel::Instance().GetSwapperManager().AllocSwap();
 	
 	if( bufMgr.Swap(blkno, (unsigned long)swapBuf, count, Buf::B_WRITE) == false )
 	{

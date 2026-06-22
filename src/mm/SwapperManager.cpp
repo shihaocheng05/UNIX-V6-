@@ -6,6 +6,17 @@ unsigned int SwapperManager::SWAPPER_ZONE_SIZE = 2000;
 SwapperManager::SwapperManager(Allocator *pAllocator)
 {
 	this->m_pAllocator = pAllocator;
+	for(unsigned int i=0;i<SWAPPER_PAGE_NUM-1;i++)
+	{
+		SwapperPage[i].pageNo=i;	//与数组的索引一一对应
+		SwapperPage[i].pte=NULL;
+		SwapperPage[i].next=&SwapperPage[i+1];
+	}
+	SwapperPage[SWAPPER_PAGE_NUM-1].pageNo=SWAPPER_PAGE_NUM-1;
+	SwapperPage[SWAPPER_PAGE_NUM-1].pte=NULL;
+	SwapperPage[SWAPPER_PAGE_NUM-1].next=NULL;
+	freeSwapList.head=&SwapperPage[0];
+	freeSwapList.tail=&SwapperPage[SWAPPER_PAGE_NUM-1];
 }
 
 SwapperManager::SwapperManager()
@@ -32,12 +43,31 @@ int SwapperManager::Initialize()
 	return 0;
 }
 
-int SwapperManager::AllocSwap( unsigned long size )
+unsigned int SwapperManager::AllocSwap()	//从空闲块队列中取队首，返回磁盘扇区号
 {
-	return this->m_pAllocator->Alloc(this->map, ( size + (BLOCK_SIZE - 1) ) / BLOCK_SIZE);
+	SwapPage*swapPage=freeSwapList.head;
+	if(swapPage!=NULL)
+	{
+		freeSwapList.head=swapPage->next;
+		if(freeSwapList.head==NULL) freeSwapList.tail=NULL;
+		swapPage->next=NULL;
+		return SWAPPER_ZONE_START_BLOCK+swapPage->pageNo*8;
+	}
+	return 0;
 }
 
-int SwapperManager::FreeSwap( unsigned long size, int startBlock )
+unsigned int SwapperManager::FreeSwap(unsigned int startBlock)	//传入磁盘扇区号，挂回空闲块队列队尾，通常不检查其返回值
 {
-	return this->m_pAllocator->Free(this->map, ( size + (BLOCK_SIZE - 1) ) / BLOCK_SIZE, startBlock);
+	unsigned int pageNo=(startBlock-SWAPPER_ZONE_START_BLOCK)/8;
+	if(freeSwapList.tail!=NULL)
+	{
+		freeSwapList.tail->next=&SwapperPage[pageNo];
+		freeSwapList.tail=freeSwapList.tail->next;
+	}
+	else
+	{
+		freeSwapList.head=freeSwapList.tail=&SwapperPage[pageNo];
+	}
+	freeSwapList.tail->next=NULL;
+	return 0;
 }

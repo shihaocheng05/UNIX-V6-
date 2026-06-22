@@ -130,13 +130,6 @@ public:
     PEParser();
 	PEParser(unsigned long peAddress);
 	unsigned long Parse();
-	/*
-	 *@comment 将Parse后的exe定位到内存中正确的位置
-	 *@Important 在Relocate之前需要首先调用Parse()以得到所需要的
-	 * exe各个section的信息，同时需要首先map好页表，否则会失败
-	 */
-	unsigned int Relocate();
-	unsigned int Relocate(Inode* p_inode, int sharedText);
 
     bool HeaderLoad(Inode* p_inode);
 
@@ -154,6 +147,7 @@ public:
 
 private:
 	unsigned long peAddress;
+public:
 	ImageNTHeader ntHeader;
  	ImageSectionHeader* sectionHeaders;
 };
